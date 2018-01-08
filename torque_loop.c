@@ -232,8 +232,8 @@ uint32_t get_force(int port)
 //				force_temp = ((uint32_t)(((data[2]<<8)|data[1])-600))/100;
 
 				force_temp = (uint32_t)((data[2]<<8)|data[1]);
-				if(force_temp > 350){
-					force_temp = force_temp -350;
+				if(force_temp > 100){
+					force_temp = force_temp -100;
 				}
 				else{
 					force_temp = 0;
@@ -354,7 +354,7 @@ void main()
 {
 	int AdcPort,MotorPort,FrocePort;
 	float adc_temp,deltav_adc,pot_temp[12];
-	int motor_temp,deltav_motor,motor_temp_p,motor_temp_v;
+	int motor_temp,deltav_motor,motor_temp_p,motor_temp_v,pid_umax,pid_umin;
 	char s[20];	
 	int i,nwrite,index;
 	uint32_t force_t,force_temp[12],force_command;
@@ -381,6 +381,8 @@ void main()
 		fgets(s,20,stdin);	
 		sscanf(s,"%d",&force_command);
 		integral_force = 0;
+		pid_umax = 500;
+		pid_umin = -500;
 		while(1){
 
 			tcflush(FrocePort,TCIFLUSH);
@@ -399,20 +401,39 @@ void main()
 		
 			deltav_force = force_command - force_t;
 //			if((deltav_force > 200)||(deltav_force < -200)){
-			if(abs(deltav_force) > 200){
-				index = 0;
+			if(deltav_motor > pid_umax){
+				if(abs(deltav_force) > 200){
+					index = 0;
+				}else{
+					index = 1;
+					if(deltav_force < 0){
+						integral_force = integral_force + deltav_force;
+					}
+				}
+			}else if(deltav_motor < pid_umin){
+				if(abs(deltav_force) > 200){
+					index = 0;
+				}else{
+					index = 1;
+					if(deltav_force > 0){
+						integral_force = integral_force + deltav_force;
+					}
+				}
 			}else{
-				index = 1;
-				integral_force = integral_force + deltav_force;
+				if(abs(deltav_force) > 200){
+					index = 0;
+				}else{
+					index = 1;
+					integral_force = integral_force + deltav_force;					
+				}
 			}
-			
-			printf("integal = %d\n",integral_force);
-			deltav_motor = deltav_force*1.5 + index*integral_force*0;
+			deltav_motor = deltav_force*6 + index*integral_force*0.1;
 			motor_temp_p = motor_temp.temp - deltav_motor;
+			printf("integal = %d daltav_force = %d deltav_motor = %d\n",integral_force,deltav_force,deltav_motor);
 
 			motor_ctl(SET_MOTION,&motor_temp_p,MotorPort);
-	
-			motor_temp_v = 500000;
+
+			motor_temp_v = 1000000;
 			motor_ctl(SET_VELOCITY,&motor_temp_v,MotorPort);
 
 			motor_ctl(TRAJECTORY_MOVE,NULL,MotorPort);

@@ -280,20 +280,20 @@ void main()
 			cnt0 = 0;
 		}
 		
-		cnt1 = cnt0%50;
-		if(cnt1<=17)
+		cnt1 = cnt0%100;
+		if(cnt1<=37)
 		{
-			user_p.p0=20000;//20000
+			user_p.p0=18000;//20000
 			user_p.v=500000;
 		}
-		else if(cnt1<=23)
+		else if(cnt1<=60)
 		{
-			user_p.p0=35000;//35000
+			user_p.p0=0;//35000
 			user_p.v=1400000;
 		}
-		else if(cnt1<=50)
+		else if(cnt1<=100)
 		{
-			user_p.p0=0;//0
+			user_p.p0=25000;//0
 			user_p.v=1400000;
 		}
 		if(user_p.p0 != old_p)
