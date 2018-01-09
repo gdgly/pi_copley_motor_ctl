@@ -193,7 +193,8 @@ uint32_t get_force(int port)
 		datagram[0] = 0;
 		nread = read(port,datagram,1);
 		if(nread<0){
-			printf("read error nread=%d\n",readcnt);	
+			printf("read error nread=%d\n",readcnt);
+			exit(1);	
 		}
 		switch(state){
 		case 0:
@@ -282,11 +283,13 @@ struct motor_ctl_t motor_ctl(char *msg, void *para, int port)
 		nread = read(port,datagram,1);	//获取串口命令
 		if(nread<0)
 		{
-			printf("read error nread=%d\n",readcnt);	
+			printf("read error nread=%d\n",readcnt);
+			exit(1);		
 		}
 		if(nread == 0)
 		{
-			printf("hello\n");
+			printf("Communication fail\n");
+			temp.state = -1;
 			return temp;
 		}
 		data[readcnt] = datagram[0];
@@ -297,13 +300,14 @@ struct motor_ctl_t motor_ctl(char *msg, void *para, int port)
 //			printf("rev = %s\n",temp.com);
 			if(strstr(temp.com,"v")!=0)
 				{	
+					temp.state = 0;
 					sscanf(temp.com,"%*s%d",&temp.temp);
 					
 				}
 			else if(strstr(temp.com,"e")!=0)
 				{
-					sscanf(temp.com,"%*s%d",&temp.temp);
-					printf("motor error = %d\n",temp.temp);
+					sscanf(temp.com,"%*s%d",&temp.state);
+					printf("motor error = %d\n",temp.state);
 				}
 			else if(strstr(temp.com,"ok")!=0)
 				{
@@ -312,8 +316,6 @@ struct motor_ctl_t motor_ctl(char *msg, void *para, int port)
 			return temp;	
 		}
 	}
-
-	return temp;
 }
 
 //对力传感器的数据进行处理
@@ -357,7 +359,7 @@ void main()
 {
 /*	int AdcPort,MotorPort,FrocePort;
 	float adc_temp,deltav_adc,pot_temp[12];
-	int motor_temp,deltav_motor,motor_temp_p,motor_temp_v,pid_umax,pid_umin;
+	int motor_temp,deltav_motor,motor_cmd_position,motor_cmd_velocity,pid_umax,pid_umin;
 	char s[20];	
 	int i,nwrite,index;
 	uint32_t force_t,force_temp[12],force_command;
@@ -375,9 +377,12 @@ void main()
 	pthread_create(&tid2,NULL,(void*)thread_motor_port,NULL);
 	pthread_create(&tid3,NULL,(void*)thread_motor_socket,NULL);
 	
-	pthread_join(tid1,NULL);			//等待线程结束，每个线程都是while(1)循环，所以不会结束
-	pthread_join(tid2,NULL);
-	pthread_join(tid3,NULL);
+//	pthread_join(tid1,NULL);			//等待线程结束，每个线程都是while(1)循环，所以不会结束
+//	pthread_join(tid2,NULL);
+//	pthread_join(tid3,NULL);
+	if((pthread_join(tid1,NULL) == 0)||(pthread_join(tid2,NULL) == 0)||(pthread_join(tid3,NULL) == 0)){
+		
+	}
 }
 
 
@@ -385,7 +390,6 @@ void main()
 void thread_force_port(void)
 {
 	int FrocePort;			//力传感器的端口号 USB0
-	char s[20];	
 	int i,nwrite,index;
 	uint32_t force_t,force_temp[12];
 	
@@ -398,6 +402,10 @@ void thread_force_port(void)
 		
 		for(i=0;i<5;i++){	
 			force_temp[i] = get_force(FrocePort);	
+			if(force_temp[i] == 0xffff){
+				close(FrocePort);
+				return;
+			}	
 		}
 		force_t = bubble_sort_and_average(force_temp,5);	
 		
@@ -414,14 +422,14 @@ void thread_force_port(void)
 void thread_motor_port(void)
 {
 	int MotorPort,cnt;			
-	int deltav_motor,deltav_motor_old,motor_temp_p,motor_temp_v,pid_umax,pid_umin;
-	char s[20];	
+	int deltav_motor,deltav_motor_old,motor_cmd_position,motor_cmd_velocity,pid_umax,pid_umin;
+//	char s[20];	
 	int i,nwrite,index,nset_acc;
 	uint32_t force_command,state_temp,state_old;
 	uint32_t time_now,time_mark;
 	int32_t deltav_force,integral_force;
 	struct timeval tv;
-	struct motor_ctl_t motor_temp;
+	struct motor_ctl_t motor_position,motor_state;
 
 	MotorPort = tty_init(MOTOR_PORT_NUM);
 	driver_init(MotorPort,MOTOR_PORT_NUM);
@@ -440,8 +448,8 @@ while(1){
 		gettimeofday(&tv,NULL);
 		time_mark = (uint32_t)(tv.tv_sec*1000+tv.tv_usec/1000);		//获取系统时间，单位为ms
 
-		motor_temp_v = 1400000;																		//设置运动速度为14000rpm 此参数需要可以配置
-		motor_ctl(SET_VELOCITY,&motor_temp_v,MotorPort);					
+		motor_cmd_velocity = 1400000;																		//设置运动速度为14000rpm 此参数需要可以配置
+		motor_ctl(SET_VELOCITY,&motor_cmd_velocity,MotorPort);					
 
 		nset_acc = 50000;					//驱动器的最大加速度设置参数
 		motor_ctl(SET_MAX_ACC,&nset_acc,MotorPort);
@@ -455,21 +463,21 @@ while(1){
 			switch(state_now){
 				case 01:																//预紧点，不能是单个位置点，需要在合适的步态和力矩下开始运动
 				if(state_temp != state_old){
-					motor_temp_p = 18000;
-					motor_ctl(SET_MOTION,&motor_temp_p,MotorPort);
+					motor_cmd_position = 18000;
+					motor_ctl(SET_MOTION,&motor_cmd_position,MotorPort);
 					motor_ctl(TRAJECTORY_MOVE,NULL,MotorPort);
 				}
 				break;
 				case 02:																//拉扯阶段，此阶段需要快速。因此将此阶段分为两段，一段是直接快速运动，当靠近最大位置时再引入力矩环
 
-				motor_temp = motor_ctl(GET_POSITION,NULL,MotorPort);			
+				motor_position = motor_ctl(GET_POSITION,NULL,MotorPort);			
 				
 				gettimeofday(&tv,NULL);
 				time_now = (uint32_t)(tv.tv_sec*1000+tv.tv_usec/1000);
 				time_now = (time_now - time_mark)&0x000fffff;	
 
-				if(motor_temp.temp > 1000){ 						//假设最大位置（最大力矩点）在0时，引入力矩环的点在1000。
-					motor_temp_p = 0;											//为了使电机快速通过，因此将位置命令直接设置到最大力矩点。
+				if(motor_position.temp > 1000){ 						//假设最大位置（最大力矩点）在0时，引入力矩环的点在1000。
+					motor_cmd_position = 0;											//为了使电机快速通过，因此将位置命令直接设置到最大力矩点。
 					integral_force = 0;
 					if(nset_acc == 50000){
 						nset_acc =1000000;
@@ -478,9 +486,9 @@ while(1){
 						motor_ctl(SET_MAX_DEC,&nset_acc,MotorPort);
 					}
 	
-					motor_ctl(SET_MOTION,&motor_temp_p,MotorPort);
+					motor_ctl(SET_MOTION,&motor_cmd_position,MotorPort);
 					motor_ctl(TRAJECTORY_MOVE,NULL,MotorPort);
-					printf("%u  motor_temp = %d\n",time_now,motor_temp.temp);
+					printf("%u  motor_temp = %d\n",time_now,motor_position.temp);
 				}else{
 					if(nset_acc == 1000000){							//电机加速度过高时会引起力矩环不稳定，因此在引入力矩回路时需要将加速度降低
 						nset_acc =200000;
@@ -522,14 +530,14 @@ while(1){
 					}
 					deltav_motor = deltav_force*6 + index*integral_force*0.1;		//PI，由于力矩回路作用时间很短，在200ms以内，因此稳定性不是最重要的，回路震荡也很少表现出来。
 	
-					motor_temp_p = motor_temp.temp - deltav_motor;
-					printf("integal = %d daltav_force = %d deltav_motor = %d motor_temp = %d\n",integral_force,deltav_force,deltav_motor,motor_temp.temp);
+					motor_cmd_position = motor_position.temp - deltav_motor;
+					printf("integal = %d daltav_force = %d deltav_motor = %d motor_temp = %d\n",integral_force,deltav_force,deltav_motor,motor_position.temp);
 
 					if((deltav_motor_old > 1000)&&(deltav_motor > 1000)&&(abs(deltav_motor - deltav_motor_old) < 200)&&(cnt < 10)){		//为了快速通过大于1000的误差，减少与电机之间的通讯
 						cnt++;
 					}else{
 						cnt = 0;
-						motor_ctl(SET_MOTION,&motor_temp_p,MotorPort);
+						motor_ctl(SET_MOTION,&motor_cmd_position,MotorPort);
 						motor_ctl(TRAJECTORY_MOVE,NULL,MotorPort);
 					}
 					deltav_motor_old = deltav_motor;
@@ -540,8 +548,8 @@ while(1){
 					nset_acc =1000000;
 					motor_ctl(SET_MAX_ACC,&nset_acc,MotorPort);
 					nset_acc =50000;
-					motor_temp_p = 25000;
-					motor_ctl(SET_MOTION,&motor_temp_p,MotorPort);
+					motor_cmd_position = 25000;
+					motor_ctl(SET_MOTION,&motor_cmd_position,MotorPort);
 					motor_ctl(TRAJECTORY_MOVE,NULL,MotorPort);
 				}
 				break;
