@@ -17,7 +17,7 @@
 #include <assert.h>
 #include <stdbool.h>
 #include "ctrl.h"
-
+#include <semaphore.h>  
 
 struct motor_ctl_t{
 	char com[256];
@@ -33,6 +33,21 @@ struct motor_module_run_info_t{
 	uint32_t zeromq_recv_client_error;
 	uint32_t zeromq_recv_gait_error;
 };
+
+struct motor_para_init_t{
+	uint32_t max_force;
+	int32_t max_position;
+	int32_t zero_position;
+	int32_t preload_position;
+	int max_velocity;
+	int nset_acc;
+	float	max_pot;
+	float pid_kp;
+	float pid_ki;
+	int pid_umax;
+	int pid_umin;
+};
+
 
 
 #define FORCE "Force"

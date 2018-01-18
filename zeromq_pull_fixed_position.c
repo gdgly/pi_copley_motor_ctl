@@ -31,11 +31,14 @@ pthread_mutex_t mutex_gait_msg;
 pthread_mutex_t mutex_client_msg;
 pthread_mutex_t mutex_run_info;
 
+sem_t sem_client;
+sem_t sem_motor;
+
 
 uint32_t force_now;										//串口上报的力传感器值
 float pot_now;
 uint32_t state_now;										//socket收到的电机运动状态命令
-bool motor_en_flag;										//1:工作   0:不工作   通过互斥锁操作
+int32_t motor_en_flag;										//1:工作   0:不工作   通过互斥锁操作
 struct motor_module_run_info_t motor_module_run_info;
 struct motor_para_init_t motor_para_init = MOTOR_PARA_DEFAULTS;
 
@@ -220,6 +223,10 @@ uint32_t get_force(int port)
 			printf("read error nread=%d\n",readcnt);
 			exit(1);	
 		}
+		
+		if(nread == 0){					
+			return 10.0;
+		}
 		switch(state){
 		case 0:
 			if(datagram[0]==0x53){
@@ -242,9 +249,14 @@ uint32_t get_force(int port)
 					break;
 				}
 				else{
-					printf("test3=%x\n",datagram[0]);
+					
 					state = 0;
 					readcnt = 0;
+					
+					pthread_mutex_lock(&mutex_run_info);			
+      		motor_module_run_info.force_senser_error++;		//校验错误，收集错误信息
+     			pthread_mutex_unlock(&mutex_run_info);					
+     			
 					break;
 				}
 			}
@@ -262,18 +274,20 @@ uint32_t get_force(int port)
 					force_temp = 0;
 				}
 //				force_temp = (uint32_t)((data[2]<<8)|data[1]);
-//				printf("temp = %f\n",adc_temp);
-				
-//				printf("temp = %u\n",force_temp);
 				state = 0;
 				readcnt= 0;
 				return force_temp;
 				break;
 			}
 			else{
-//				printf("test4=%x\n",datagram[0]);
+
 				state = 0;
 				readcnt= 0;
+				
+				pthread_mutex_lock(&mutex_run_info);			
+      	motor_module_run_info.force_senser_error++;		//校验错误，收集错误信息
+     		pthread_mutex_unlock(&mutex_run_info);	
+     			
 				break;
 			}
 		}
@@ -289,8 +303,15 @@ float get_pot(int port)
 	while(1){
 		datagram[0] = 0;
 		nread = read(port,datagram,1);
+		
 		if(nread<0){
+			exit(1);
 		}
+		
+		if(nread == 0){	
+			return 0xFFFF;
+		}
+		
 		switch(state){
 		case 0:
 			if(datagram[0]==0x53){
@@ -315,6 +336,11 @@ float get_pot(int port)
 				else{
 					state = 0;
 					readcnt = 0;
+					
+					pthread_mutex_lock(&mutex_run_info);			
+      		motor_module_run_info.pot_senser_error++;		//校验错误，收集错误信息
+     			pthread_mutex_unlock(&mutex_run_info);
+					
 					break;
 				}
 			}
@@ -330,6 +356,11 @@ float get_pot(int port)
 			else{
 				state = 0;
 				readcnt= 0;
+				
+				pthread_mutex_lock(&mutex_run_info);			
+      	motor_module_run_info.pot_senser_error++;		//校验错误，收集错误信息
+     		pthread_mutex_unlock(&mutex_run_info);
+     							
 				break;
 			}
 		}
@@ -370,6 +401,11 @@ struct motor_ctl_t motor_ctl(char *msg, void *para, int port)
 		if(nread == 0)
 		{
 			printf("Communication fail\n");
+			
+			pthread_mutex_lock(&mutex_run_info);			
+      motor_module_run_info.motor_driver_error++;		//通讯失败错误信息累计
+     	pthread_mutex_unlock(&mutex_run_info); 
+     	     			 	
 			temp.state = -1;
 			return temp;
 		}
@@ -389,6 +425,11 @@ struct motor_ctl_t motor_ctl(char *msg, void *para, int port)
 				{
 					sscanf(temp.com,"%*s%d",&temp.state);
 					printf("motor error = %d\n",temp.state);
+					
+					pthread_mutex_lock(&mutex_run_info);			
+      		motor_module_run_info.motor_driver_error++;		//通讯失败错误信息累计
+     			pthread_mutex_unlock(&mutex_run_info);
+     			
 				}
 			else if(strstr(temp.com,"ok")!=0)
 				{
@@ -467,12 +508,21 @@ void main()
 	pthread_create(&tid5,NULL,(void*)thread_pot_port,NULL);
 	pthread_create(&tid6,NULL,(void*)thread_motor_module_run_info,NULL);
 	
-	
+	sem_init(&sem_client,0,0);
+	sem_init(&sem_motor,0,0);
+		
 	
 //	pthread_join(tid1,NULL);			//等待线程结束，每个线程都是while(1)循环，所以不会结束
 //	pthread_join(tid2,NULL);
 //	pthread_join(tid3,NULL);
-	if((pthread_join(tid1,NULL) == 0)||(pthread_join(tid2,NULL) == 0)||(pthread_join(tid3,NULL) == 0)){
+	if((pthread_join(tid1,NULL) == 0)\
+		||(pthread_join(tid2,NULL) == 0)\
+		||(pthread_join(tid3,NULL) == 0)\
+		||(pthread_join(tid4,NULL) == 0)\
+		||(pthread_join(tid5,NULL) == 0)\
+		||(pthread_join(tid6,NULL) == 0)\
+		
+		){
 		
 	}
 }
@@ -495,8 +545,10 @@ void thread_force_port(void)
 		for(i=0;i<5;i++){	
 			force_temp[i] = get_force(FrocePort);	
 			if(force_temp[i] == 0xffff){
-				close(FrocePort);
-				return;
+				pthread_mutex_lock(&mutex_run_info);			
+				motor_module_run_info.force_senser_error++;		//校验错误，收集错误信息
+				pthread_mutex_unlock(&mutex_run_info);					
+				i--;
 			}	
 		}
 		force_t = bubble_sort_and_average(force_temp,5);	
@@ -529,6 +581,12 @@ void thread_pot_port(void)
 			pot_temp[i] = get_pot(AdcPort);
 			if((i>0)&(i<9)){
 				pot_t = pot_temp[i]+pot_t ;
+				if(pot_temp[i]==10.0){
+					pthread_mutex_lock(&mutex_run_info);			
+					motor_module_run_info.pot_senser_error++;		//校验错误，收集错误信息
+					pthread_mutex_unlock(&mutex_run_info);	
+					i--;	
+				}
 			}		
 		}
 		pot_t = pot_t /8;
@@ -555,7 +613,7 @@ void thread_motor_port(void)
 	int32_t deltav_force;
 	struct timeval tv;
 	struct motor_ctl_t motor_position,motor_state,motor_speed;
-	bool motor_en_flag_temp;
+	int32_t motor_en_flag_temp,motor_en_flag_temp_old;
 	struct motor_para_init_t motor_para_init_temp;
 
 	MotorPort = tty_init(MOTOR_PORT_NUM);
@@ -574,6 +632,10 @@ void thread_motor_port(void)
 		gettimeofday(&tv,NULL);
 		time_mark = (uint32_t)(tv.tv_sec*1000+tv.tv_usec/1000);		//获取系统时间，单位为ms
 
+
+		sem_wait(&sem_motor);
+		printf("this is a test start\n");
+			
 		motor_cmd_velocity = motor_para_init_temp.max_velocity;																		//设置运动速度为14000rpm 此参数需要可以配置
 		motor_ctl(SET_VELOCITY,&motor_cmd_velocity,MotorPort);					
 
@@ -587,10 +649,47 @@ void thread_motor_port(void)
 			pthread_mutex_lock(&mutex_client_msg);			//获取当前使能状态									
 			motor_en_flag_temp = motor_en_flag;
 			pthread_mutex_unlock(&mutex_client_msg);		
-			motor_en_flag_temp = 1;
+			motor_en_flag_temp = CTL_CMDMOTIONSTART;
 				
-			if(motor_en_flag_temp){			
+			switch(motor_en_flag_temp){			
+				case CTL_CMDINITIAL:																				//自检
+					
+					
+				break;
 				
+				case CTL_CMDPOWERDOWN:																				//关机
+					
+				nwrite = DISABLE_MOTOR;
+				motor_ctl(SET_DESIRED_STATE,&nwrite,MotorPort);
+				return;
+					
+				break;
+							
+				case CTL_CMDMOTIONSLEEP:																		//停机
+					
+				if(motor_en_flag_temp != motor_en_flag_temp_old){	
+					motor_cmd_position = motor_para_init_temp.zero_position;
+					motor_ctl(SET_MOTION,&motor_cmd_position,MotorPort);
+					motor_ctl(TRAJECTORY_MOVE,NULL,MotorPort);				
+				}
+					
+				break;
+						
+				case CTL_CMDMOTIONSTOP:																						//停止
+					
+				if(motor_en_flag_temp != motor_en_flag_temp_old){	
+					nwrite = DISABLE_MOTOR;
+					motor_ctl(SET_DESIRED_STATE,&nwrite,MotorPort);	
+				}			
+					
+				break;
+				
+				case CTL_CMDMOTIONSTART:																					//开始工作
+				
+				if(motor_en_flag_temp_old == CTL_CMDMOTIONSTOP){
+					nwrite = ENABLE_POSITION_MODE;
+					motor_ctl(SET_DESIRED_STATE,&nwrite,MotorPort);					
+				}
 				pthread_mutex_lock(&mutex_gait_msg);					//获取电机运动状态，socket
 				state_temp = state_now;
 				pthread_mutex_unlock(&mutex_gait_msg);
@@ -644,6 +743,12 @@ void thread_motor_port(void)
 						motor_cmd_position = motor_para_init_temp.zero_position;
 						motor_ctl(SET_MOTION,&motor_cmd_position,MotorPort);
 						motor_ctl(TRAJECTORY_MOVE,NULL,MotorPort);
+						
+						motor_state = motor_ctl(GET_MOTOR_FUALT,NULL,MotorPort);						
+      			pthread_mutex_lock(&mutex_run_info);			
+     		 		motor_module_run_info.motor_driver_state = motor_state.temp;		//获取驱动器的状态，每个步态周期一次，0为全部正常，512为过流报警
+     			 	pthread_mutex_unlock(&mutex_run_info);  				
+						
 					}
 					motor_speed = motor_ctl(GET_ACTUAL_SPEED,NULL,MotorPort);
 					motor_position = motor_ctl(GET_POSITION,NULL,MotorPort);
@@ -658,24 +763,31 @@ void thread_motor_port(void)
 				}
 					
 				if((state_temp == 1)&&(state_old == 3)&&(max_force_cnt != 0)){
+					
 					gettimeofday(&tv,NULL);
 					time_now = (uint32_t)(tv.tv_sec*1000+tv.tv_usec/1000);
 					time_now = (time_now - time_mark)&0x000fffff;	
+					
 					max_force = (uint32_t)(max_force/max_force_cnt);
 					deltav_force = motor_para_init_temp.max_force - max_force;
 					max_position = max_position - deltav_force*2;
+					
 					if(max_position < motor_para_init_temp.max_position - 4000){
 						max_position = motor_para_init_temp.max_position - 4000;
 					}else if(max_position > motor_para_init_temp.max_position + 4000){
 						max_position = motor_para_init_temp.max_position + 4000;
 					}
+					
 					max_force = 0;
 					max_force_cnt = 0;
 				}
 				state_old = state_temp;
-			}else{
-				usleep(10000);
+				break;
+				default:
+					usleep(100000);
+				break;
 			}
+			motor_en_flag_temp_old = motor_en_flag_temp;
 		}
 	}	
 	close(MotorPort);	
@@ -775,37 +887,59 @@ int thread_client_zeromq(void)
 /*3. 根据分辨 cmdmotormsg.opt 参数进行处理*/
 /*4. 完成后返回结果给 ctrl node*/
 
+	sleep(1);
+	sem_post(&sem_motor);
+	
+
 	while (1) {
 		/* 1.电机启动，准备就绪，等待接受控制模块初始化指令*/
 		int nbytes = zmq_recv (responder, &cmdmotormsg, sizeof(cmdmotormsg), 0);
 		assert (nbytes != -1);
 		if(cmdmotormsg.nodeID == NODEID_OF_MOTOR){
+		
       switch(cmdmotormsg.opt){
       	case CTL_CMDINITIAL:
       		
+      	pthread_mutex_lock(&mutex_client_msg);			
+      	motor_en_flag = CTL_CMDINITIAL;
+      	pthread_mutex_unlock(&mutex_client_msg);
+      	
+      	sem_post(&sem_motor);
+      	sem_wait(&sem_client);     
+      	 	    
+      	sendrdymsg.rt = CTL_READY;   
+      	   	  		
       	break;
       	
-      	case CTL_CMDSTART:
+      	case CTL_CMDMOTIONSTART:
       	
-      	pthread_mutex_lock(&mutex_client_msg);			//获取当前使能状态
-      	motor_en_flag = 1;
+      	pthread_mutex_lock(&mutex_client_msg);			
+      	motor_en_flag = CTL_CMDMOTIONSTART;
       	pthread_mutex_unlock(&mutex_client_msg);
       	
       	break	;
       	
-      	case CTL_CMDSHUTDOWN:
+      	case CTL_CMDPOWERDOWN:
 
-      	pthread_mutex_lock(&mutex_client_msg);			//获取当前使能状态
-      	motor_en_flag = 0;
+      	pthread_mutex_lock(&mutex_client_msg);			
+      	motor_en_flag = CTL_CMDPOWERDOWN;
       	pthread_mutex_unlock(&mutex_client_msg);      	
       	
       	break;
       	
-      	case CTL_CMDSTOP:
+      	case CTL_CMDMOTIONSTOP:
       		
-      	pthread_mutex_lock(&mutex_client_msg);			//获取当前使能状态
-      	motor_en_flag = 0;
+      	pthread_mutex_lock(&mutex_client_msg);			
+      	motor_en_flag = CTL_CMDMOTIONSTOP;
       	pthread_mutex_unlock(&mutex_client_msg);      	
+      	
+      	break;
+      	
+      	case CTL_CMDMOTIONSLEEP:
+      	
+      	pthread_mutex_lock(&mutex_client_msg);			
+      	motor_en_flag = CTL_CMDMOTIONSLEEP;
+      	pthread_mutex_unlock(&mutex_client_msg);  
       	
       	break;
       	
@@ -814,7 +948,7 @@ int thread_client_zeromq(void)
       	break; 
       }
       
-      sendrdymsg.rt = CTL_READY;
+
       zmq_send (responder, &sendrdymsg, sizeof(sendrdymsg), 0);
       
       
@@ -851,7 +985,9 @@ void thread_motor_module_run_info(void)
 	struct motor_module_run_info_t motor_module_run_info_temp;
 	uint32_t force_temp;
 	float pot_temp;
+	
 	while(1){
+		
 		pthread_mutex_lock(&mutex_gait_msg);
 		motor_module_run_info_temp = motor_module_run_info;
 		pthread_mutex_unlock(&mutex_gait_msg);	
