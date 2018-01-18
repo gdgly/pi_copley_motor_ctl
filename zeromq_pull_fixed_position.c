@@ -1,6 +1,21 @@
 //zeromq_pull_fixed_position.c
 #include "shiki.h"
 
+
+#define MOTOR_PARA_DEFAULTS {	550,\
+														 	8000,\
+														 	25000,\
+														 	18000,\
+														 	800000,\
+														 	500000,\
+														 	0,\
+														 	6.0,\
+														 	0.1,\
+														 	500,\
+														 	-500\
+														}
+														
+														
 struct motor_ctl_t motor_ctl(char *msg, void *para, int port);
 
 void thread_force_port(void);
@@ -22,7 +37,7 @@ float pot_now;
 uint32_t state_now;										//socket收到的电机运动状态命令
 bool motor_en_flag;										//1:工作   0:不工作   通过互斥锁操作
 struct motor_module_run_info_t motor_module_run_info;
-
+struct motor_para_init_t motor_para_init = MOTOR_PARA_DEFAULTS;
 
 //设置串口参数，波特率 奇偶位等
 int set_opt(int fd,int nSpeed,int nBits,char nEvent,int nStop)
@@ -498,7 +513,7 @@ void thread_force_port(void)
 //电位计读取线程
 void thread_pot_port(void)
 {
-	int AdcPort;			//力传感器的端口号
+	int AdcPort;			//电位计的端口号
 	int i;
 	float pot_t,pot_temp[12];
 	
@@ -531,17 +546,17 @@ void thread_pot_port(void)
 //电机控制线程
 void thread_motor_port(void)
 {
-	int MotorPort,cnt;			
-	int deltav_motor,deltav_motor_old,motor_cmd_position,motor_cmd_velocity,pid_umax,pid_umin;
+	int MotorPort;			
+	int deltav_motor,deltav_motor_old,motor_cmd_position,motor_cmd_velocity,max_position;
 //	char s[20];	
 	int i,nwrite,index,nset_acc,max_force_cnt;
-	uint32_t force_command,state_temp,state_old,max_force,gait_temp,force_temp;
+	uint32_t state_temp,state_old,gait_temp,force_temp,max_force;
 	uint32_t time_now,time_mark;
-	int32_t deltav_force,integral_force,max_position = 8000;
+	int32_t deltav_force;
 	struct timeval tv;
 	struct motor_ctl_t motor_position,motor_state,motor_speed;
 	bool motor_en_flag_temp;
-	
+	struct motor_para_init_t motor_para_init_temp;
 
 	MotorPort = tty_init(MOTOR_PORT_NUM);
 	driver_init(MotorPort,MOTOR_PORT_NUM);
@@ -551,22 +566,20 @@ void thread_motor_port(void)
 	//		printf("enter force\n");
 	//		fgets(s,20,stdin);	
 	//		sscanf(s,"%d",&force_command);
-		force_command = 550;			//电机拉扯的最大力矩，此参数需要可以配置
-		integral_force = 0;				//力矩回路的积分量
-		pid_umax = 500;						//抗积分饱和的最大限位
-		pid_umin = -500;					//抗积分饱和的最小限位
+		motor_para_init_temp = motor_para_init;
+		max_position = motor_para_init_temp.max_position;
 		deltav_motor_old = 0;			
 		max_force_cnt = 0;
 		
 		gettimeofday(&tv,NULL);
 		time_mark = (uint32_t)(tv.tv_sec*1000+tv.tv_usec/1000);		//获取系统时间，单位为ms
 
-		motor_cmd_velocity = 800000;																		//设置运动速度为14000rpm 此参数需要可以配置
+		motor_cmd_velocity = motor_para_init_temp.max_velocity;																		//设置运动速度为14000rpm 此参数需要可以配置
 		motor_ctl(SET_VELOCITY,&motor_cmd_velocity,MotorPort);					
 
-		nset_acc = 500000;					//驱动器的最大加速度设置参数
+		nset_acc = motor_para_init_temp.nset_acc;					//驱动器的最大加速度设置参数
 		motor_ctl(SET_MAX_DEC,&nset_acc,MotorPort);
-		nset_acc = 500000;
+		nset_acc = motor_para_init_temp.nset_acc;
 		motor_ctl(SET_MAX_ACC,&nset_acc,MotorPort);
 
 		while(1){
@@ -585,7 +598,7 @@ void thread_motor_port(void)
 				switch(state_now){
 					case 01:																//预紧点，不能是单个位置点，需要在合适的步态和力矩下开始运动
 					if(state_temp != state_old){
-						motor_cmd_position = 18000;
+						motor_cmd_position = motor_para_init_temp.preload_position;
 						motor_ctl(SET_MOTION,&motor_cmd_position,MotorPort);
 						motor_ctl(TRAJECTORY_MOVE,NULL,MotorPort);
 					}
@@ -618,8 +631,8 @@ void thread_motor_port(void)
 
 						max_force = max_force + force_temp;			
 						max_force_cnt++;		
-										
-					}
+
+					}										
 					printf("%u motor_position = %d force_temp = %d motor_cmd_position = %d\n",time_now,motor_position.temp,force_temp,motor_cmd_position);
 					break;
 						
@@ -628,7 +641,7 @@ void thread_motor_port(void)
 						nset_acc =500000;
 						motor_ctl(SET_MAX_ACC,&nset_acc,MotorPort);
 						nset_acc =50000;
-						motor_cmd_position = 25000;
+						motor_cmd_position = motor_para_init_temp.zero_position;
 						motor_ctl(SET_MOTION,&motor_cmd_position,MotorPort);
 						motor_ctl(TRAJECTORY_MOVE,NULL,MotorPort);
 					}
@@ -649,10 +662,12 @@ void thread_motor_port(void)
 					time_now = (uint32_t)(tv.tv_sec*1000+tv.tv_usec/1000);
 					time_now = (time_now - time_mark)&0x000fffff;	
 					max_force = (uint32_t)(max_force/max_force_cnt);
-					deltav_force = force_command - max_force;
+					deltav_force = motor_para_init_temp.max_force - max_force;
 					max_position = max_position - deltav_force*2;
-					if(max_position < 4000){
-						max_position = 4000;
+					if(max_position < motor_para_init_temp.max_position - 4000){
+						max_position = motor_para_init_temp.max_position - 4000;
+					}else if(max_position > motor_para_init_temp.max_position + 4000){
+						max_position = motor_para_init_temp.max_position + 4000;
 					}
 					max_force = 0;
 					max_force_cnt = 0;
@@ -766,6 +781,10 @@ int thread_client_zeromq(void)
 		assert (nbytes != -1);
 		if(cmdmotormsg.nodeID == NODEID_OF_MOTOR){
       switch(cmdmotormsg.opt){
+      	case CTL_CMDINITIAL:
+      		
+      	break;
+      	
       	case CTL_CMDSTART:
       	
       	pthread_mutex_lock(&mutex_client_msg);			//获取当前使能状态
@@ -795,6 +814,7 @@ int thread_client_zeromq(void)
       	break; 
       }
       
+      sendrdymsg.rt = CTL_READY;
       zmq_send (responder, &sendrdymsg, sizeof(sendrdymsg), 0);
       
       
@@ -831,16 +851,20 @@ void thread_motor_module_run_info(void)
 	struct motor_module_run_info_t motor_module_run_info_temp;
 	uint32_t force_temp;
 	float pot_temp;
+	while(1){
+		pthread_mutex_lock(&mutex_gait_msg);
+		motor_module_run_info_temp = motor_module_run_info;
+		pthread_mutex_unlock(&mutex_gait_msg);	
 		
-	pthread_mutex_lock(&mutex_gait_msg);
-	motor_module_run_info_temp = motor_module_run_info;
-	pthread_mutex_unlock(&mutex_gait_msg);	
-	
-	pthread_mutex_lock(&mutex_force);			//获取当前力矩									
-	force_temp = force_now;
-	pthread_mutex_unlock(&mutex_force);			
-	
-	pthread_mutex_lock(&mutex_pot);			//获取当前力矩									
-	pot_temp = pot_now;
-	pthread_mutex_unlock(&mutex_pot);			
+		pthread_mutex_lock(&mutex_force);			//获取当前力矩									
+		force_temp = force_now;
+		pthread_mutex_unlock(&mutex_force);			
+		
+		pthread_mutex_lock(&mutex_pot);			//获取当前力矩									
+		pot_temp = pot_now;
+		pthread_mutex_unlock(&mutex_pot);		
+		
+		usleep(100000);
+	}	
+		
 }
