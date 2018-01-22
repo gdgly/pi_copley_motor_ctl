@@ -25,6 +25,23 @@ struct motor_ctl_t{
 	int state;
 };
 
+struct motor_module_check_info_t{
+	uint32_t pot_port_state;
+	uint32_t force_port_state;
+	uint32_t motor_port_state;
+	uint32_t motor_out_of_ctl;
+	uint32_t motor_module_check_results;	
+};
+
+typedef enum 
+{
+    PORT_OK = 11,
+    PORT_OPEN_ERROR,
+    NO_DATA,
+    DATA_OUT_OF_RANGE,
+} PORT_STATE_TypeDef;
+
+
 struct motor_module_run_info_t{
 	uint32_t force_senser_error;
 	uint32_t pot_senser_error;
