@@ -979,42 +979,51 @@ void thread_gait_zeromq(void)
 //与系统管理模块通讯
 int thread_client_zeromq(void)
 {
-	//  Socket to talk to clients
-	void *context = zmq_ctx_new ();
-	void *responder = zmq_socket (context, ZMQ_REP);
-	int rc = zmq_bind (responder, "tcp://*:8000");
-	assert (rc == 0);
-
-
+	
+	
 	CTLCmdMsgTypeDef cmdmotormsg;
 	memset(&cmdmotormsg,0,sizeof(cmdmotormsg));
 
 	CTLCmdRtMsgTypeDef sendrdymsg;
 	memset(&sendrdymsg,0,sizeof(sendrdymsg));
 	sendrdymsg.nodeID = NODEID_OF_MOTOR;
+	
+	
+	//  Socket to talk to clients
+	void *context = zmq_ctx_new ();
+	void *responder = zmq_socket (context, ZMQ_REP);
+	int rc = zmq_bind (responder,"tcp://*:8000");
+	printf("what is rc %d\n",rc);
+	assert (rc == 0);
 
+
+
+
+//	zmq_setsockopt(responder, ZMQ_SUBSCRIBE, "", 0);
 /* 1.电机启动，准备就绪，等待接受控制模块初始化指令*/
 /*2. 接收控制模块指令，并执行，返回结果*/
 /*3. 根据分辨 cmdmotormsg.opt 参数进行处理*/
 /*4. 完成后返回结果给 ctrl node*/
 
 
-  pthread_mutex_lock(&mutex_client_msg);			
-  motor_en_flag = CTL_CMDINITIAL;
-  pthread_mutex_unlock(&mutex_client_msg);
-  
-	sem_post(&sem_motor);
-	sem_wait(&sem_client); 
+//  pthread_mutex_lock(&mutex_client_msg);			
+//  motor_en_flag = CTL_CMDINITIAL;
+//  pthread_mutex_unlock(&mutex_client_msg);
+//  
+//	sem_post(&sem_motor);
+//	sem_wait(&sem_client); 
+//	
+//	pthread_mutex_lock(&mutex_client_msg);
+//	motor_en_flag = CTL_CMDMOTIONSTART;
+//	pthread_mutex_unlock(&mutex_client_msg);
 	
-	pthread_mutex_lock(&mutex_client_msg);
-	motor_en_flag = CTL_CMDMOTIONSTART;
-	pthread_mutex_unlock(&mutex_client_msg);
-	printf("this is a test client\n");	
 	
 	while (1) {
 		/* 1.电机启动，准备就绪，等待接受控制模块初始化指令*/
-		int nbytes = zmq_recv (responder, &cmdmotormsg, sizeof(cmdmotormsg), 0);
-		assert (nbytes != -1);
+		printf("this is a test client\n");	
+		zmq_recv (responder,&cmdmotormsg,sizeof(cmdmotormsg),0);
+		printf("what is rev : %d  %d \n",cmdmotormsg.nodeID,cmdmotormsg.opt);
+		
 		if(cmdmotormsg.nodeID == NODEID_OF_MOTOR){
 		
       switch(cmdmotormsg.opt){
