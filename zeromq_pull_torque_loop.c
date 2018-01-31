@@ -1,20 +1,6 @@
 //zeromq_pull_fixed_position.c
 #include "shiki.h"
 
-
-#define MOTOR_PARA_DEFAULTS {	900,\
-														 	14000,\
-														 	30000,\
-														 	23000,\
-														 	800000,\
-														 	500000,\
-														 	0,\
-														 	4000.0,\
-														 	20.0,\
-														 	100000,\
-														 	-100000\
-														}
-
 #define VELOCITY_MODE_MAX_SPEED 1500000
 #define VELOCITY_MODE_MAX_ACC 2000000
 #define SELF_CHECK_POT_VALUE 0.3
@@ -47,172 +33,7 @@ uint32_t state_now;										//socket收到的电机运动状态命令
 int32_t motor_en_flag;										//1:工作   0:不工作   通过互斥锁操作
 struct motor_module_run_info_t motor_module_run_info;
 struct motor_module_check_info_t motor_module_check_info;
-struct motor_para_init_t motor_para_init = MOTOR_PARA_DEFAULTS;
-
-//设置串口参数，波特率 奇偶位等
-int set_opt(int fd,int nSpeed,int nBits,char nEvent,int nStop)
-{
-	struct termios newtio,oldtio;
-	//保存现有串口参数设置
-	if(tcgetattr(fd,&oldtio)!=0){
-		perror("Setup Serial 1");
-		return -1;
-	}
-	bzero(&newtio,sizeof(newtio));
-	//设置该标志，才可以设置波特率，字符大小，数据位，停止位等参数
-	newtio.c_cflag |= CLOCAL | CREAD;
-	newtio.c_cflag &= ~CSIZE;
-	//设置停止位
-	switch(nBits){
-		case 7:
-			newtio.c_cflag |=CS7;
-			break;
-		case 8:
-			newtio.c_cflag |=CS8;
-			break;
-	}
-	//设置奇偶校验位
-	switch(nEvent) {
-		case 'O':	//奇
-			newtio.c_cflag |= PARENB;
-			newtio.c_cflag |= PARODD;
-			newtio.c_iflag |= (INPCK|ISTRIP);
-		break;
-		case 'E':	//偶
-			newtio.c_iflag |= (INPCK|ISTRIP);
-			newtio.c_cflag |= PARENB;
-			newtio.c_cflag &= ~PARODD;
-		break;
-		case 'N':	//无校验
-			newtio.c_cflag &= ~PARENB;
-		break;
-	}
-	//设置波特率
-	switch(nSpeed){
-		case 300:
-			cfsetispeed(&newtio,B300);
-			cfsetospeed(&newtio,B300);
-		break;
-		case 600:
-			cfsetispeed(&newtio,B600);
-			cfsetospeed(&newtio,B600);
-		break;
-		case 2400:
-			cfsetispeed(&newtio,B2400);
-			cfsetospeed(&newtio,B2400);
-		break;
-		case 4800:
-			cfsetispeed(&newtio,B4800);
-			cfsetospeed(&newtio,B4800);
-		break;
-		case 9600:
-			cfsetispeed(&newtio,B9600);
-			cfsetospeed(&newtio,B9600);
-		break;
-		case 115200:
-			cfsetispeed(&newtio,B115200);
-			cfsetospeed(&newtio,B115200);
-		break;
-		default:
-			cfsetispeed(&newtio,B9600);
-			cfsetospeed(&newtio,B9600);
-		break;
-	}
-	//设置停止位
-	if(nStop ==1){
-		newtio.c_cflag &= ~CSTOPB;
-	}else if(nStop==2) {
-		newtio.c_cflag |= CSTOPB;
-	}
-	//设置等待时间和最小接收字符，设置等待时间为1s
-	newtio.c_cc[VTIME]=1;
-	newtio.c_cc[VMIN]=0;
-	//处理未接收字符
-	tcflush(fd,TCIFLUSH);
-  	//激活新配置
-	if((tcsetattr(fd,TCSANOW,&newtio))!=0){
-		perror("com set error");
-		return -1;
-	}
-//	fprintf(stderr,"set done!\n");
-	return 0;
-}
-
-//串口初始化，设置串口参数，驱动器上电默认波特率为9600，需要将其改为115200
-void driver_init(int port,char* port_num)
-{
-	int ret=0;
-	int nwrite;
-
-	if(port_num != MOTOR_PORT_NUM){
- 		ret = set_opt(port,115200,8,'N',1);
-  		if(ret < 0){
-			perror("set_opt error\n");
-		}
-		return;
-	}
-
-	if(port_num == MOTOR_PORT_NUM){
-//		ret = set_opt(port,9600,8,'N',1);			
-//		if(ret < 0) {
-//			perror("set_opt error\n");
-//		}
-//		char baud[]="s r0x90 115200\n";
-//		write(port,baud,strlen(baud));			//驱动器上电默认波特率为9600，需要将其改为115200
-//
-//		usleep(500000);
-
- 		ret = set_opt(port,115200,8,'N',1);
-  		if(ret < 0) {
-			perror("set_opt error\n");
-		}
-		return;
-	}
-}
-
-
-
-//打开串口设备函数
-//驱动器串口默认为USB1，电位计串口默认为USB0，力传感器串口默认为USB2
-int tty_init(char *CurrentPort)
-{
-	char com[16],pnum[2];
-	int TempPort;
-	//打开串口设备
-//  	if (argc > 1) {
-//  	  	CurrentPort = atoi(argv[1]);
-//  	  	if(CurrentPort>255)
-// 	  		CurrentPort=0;
-//  	}
-
-  memset(com, 0, sizeof(com));
-//  	strcpy(com, "/dev/ttyUSB");
-//  	itoa(CurrentPort, pnum, 10);
-//	memset(pnum,0,sizeof(pnum));
-//	sprintf(pnum,"%d",CurrentPort);
-//  	strcat(com, pnum);
-//  	fprintf(stderr,"port=%d,dev=%s\n",CurrentPort,com);
-	sprintf(com,CurrentPort,NULL);
-  TempPort = open(com, O_RDWR|O_NOCTTY|O_NDELAY);
-	printf("tempport = %d\n",TempPort);
-  if (TempPort < 0 ) {
-		return TempPort;
-  }
-  	//恢复串口为阻塞状态
-  if(fcntl(TempPort,F_SETFL,0)<0)
-  	printf("fcntl failed\n");
-  else
-  	printf("fcntl=%d\n",fcntl(TempPort,F_SETFL,0));
-  	//测试是否为终端设备
-  if(isatty(STDIN_FILENO)==0){
-  	printf("standard input is not a terminal device\n");
-	}
-  else
-  	printf("isatty success!\n");
-
-	return TempPort;
-}
-
+struct motor_para_init_t motor_para_init;
 
 //获取力传感器数据，一帧的格式为 帧头：0x53 数据：0x** 0x** 校验：两个数据的与 帧尾：0x59
 int get_force(int port,uint32_t *msg)
@@ -680,7 +501,11 @@ void thread_motor_port(void)
 	//		printf("enter force\n");
 	//		fgets(s,20,stdin);	
 	//		sscanf(s,"%d",&force_command);
+	
+		sem_wait(&sem_motor);
+  	pthread_mutex_lock(&mutex_client_msg);	
 		motor_para_init_temp = motor_para_init;
+		pthread_mutex_unlock(&mutex_client_msg);			
 		max_position = motor_para_init_temp.max_position;
 		deltav_motor_old = 0;			
 		max_force_cnt = 0;
@@ -689,10 +514,6 @@ void thread_motor_port(void)
 		time_mark = (uint32_t)(tv.tv_sec*1000+tv.tv_usec/1000);		//获取系统时间，单位为ms
 
 
-
-			
-
-		sem_wait(&sem_motor);
 		while(1){
 			
 			pthread_mutex_lock(&mutex_client_msg);			//获取当前使能状态									
@@ -1017,7 +838,8 @@ void thread_gait_zeromq(void)
 	
 	void *context = zmq_ctx_new ();
 	void *requester = zmq_socket (context, ZMQ_SUB);
-	zmq_connect (requester, "tcp://localhost:8011");
+//	zmq_connect (requester, "tcp://localhost:8011");
+    zmq_connect (requester, "tcp://192.168.1.16:8011");
 //	zmq_connect (requester, "tcp://192.168.1.11:8011");
 	zmq_setsockopt(requester, ZMQ_SUBSCRIBE, "", 0);
 	int request_nbr;
@@ -1027,7 +849,7 @@ void thread_gait_zeromq(void)
 		char buffer[1024],temp[32];
 		memset(buffer,0,sizeof(buffer));
 		zmq_recv (requester, buffer, sizeof(buffer), 0);
-//		printf("what is rev : %s\n",buffer);
+		printf("what is rev : %s\n",buffer);
 		s = zeromq_msg_getdata(buffer,GAIT,sizeof(GAIT));
 		if(s != NULL){
 		
@@ -1055,6 +877,106 @@ void thread_gait_zeromq(void)
 	return ; 
 }
 
+int get_default_settings(void)
+{
+	int ret;  
+	void *handle;  
+	const char *filepath = "./motor_para_defaults.txt";
+	struct motor_para_init_t motor_para_init_temp;
+	
+	ret = init(filepath, &handle); 
+	if(ret != 0){
+		return -1;	
+	}
+
+	char valuebuf[128];
+	
+	ret = getValue(handle, "max_force", valuebuf);  
+	if (ret != 0) {  
+		return -1;  
+	}else{
+		sscanf(valuebuf,"%d",&motor_para_init_temp.max_force);
+	}
+
+	ret = getValue(handle, "max_position", valuebuf);  
+	if (ret != 0) {  
+		return -1;  
+	}else{
+		sscanf(valuebuf,"%d",&motor_para_init_temp.max_position);
+	}
+
+	ret = getValue(handle, "zero_position", valuebuf);  
+	if (ret != 0) {  
+		return -1;  
+	}else{
+		sscanf(valuebuf,"%d",&motor_para_init_temp.zero_position);
+	}
+	
+	ret = getValue(handle, "preload_position", valuebuf);  
+	if (ret != 0) {  
+		return -1;  
+	}else{
+		sscanf(valuebuf,"%d",&motor_para_init_temp.preload_position);
+	}
+	
+	ret = getValue(handle, "max_velocity", valuebuf);  
+	if (ret != 0) {  
+		return -1;  
+	}else{
+		sscanf(valuebuf,"%d",&motor_para_init_temp.max_velocity);
+	}
+
+	ret = getValue(handle, "nset_acc", valuebuf);  
+	if (ret != 0) {  
+		return -1;  
+	}else{
+		sscanf(valuebuf,"%d",&motor_para_init_temp.nset_acc);
+	}
+	
+	ret = getValue(handle, "max_pot", valuebuf);  
+	if (ret != 0) {  
+		return -1;  
+	}else{
+		sscanf(valuebuf,"%f",&motor_para_init_temp.max_pot);
+	}
+	
+	ret = getValue(handle, "pid_kp", valuebuf);  
+	if (ret != 0) {  
+		return -1;  
+	}else{
+		sscanf(valuebuf,"%f",&motor_para_init_temp.pid_kp);
+	}
+	
+	ret = getValue(handle, "pid_ki", valuebuf);  
+	if (ret != 0) {  
+		return -1;  
+	}else{
+		sscanf(valuebuf,"%f",&motor_para_init_temp.pid_ki);
+	}
+
+	ret = getValue(handle, "pid_umax", valuebuf);  
+	if (ret != 0) {  
+		return -1;  
+	}else{
+		sscanf(valuebuf,"%d",&motor_para_init_temp.pid_umax);
+	}
+	
+	ret = getValue(handle, "pid_umin", valuebuf);  
+	if (ret != 0) {  
+		return -1;  
+	}else{
+		sscanf(valuebuf,"%d",&motor_para_init_temp.pid_umin);
+	}
+	
+	motor_para_init = motor_para_init_temp;
+	
+	ret = release(&handle);  
+	if (ret != 0) {  
+		return -1;
+	}  
+      
+	return 0;
+}
 
 
 //与系统管理模块通讯
@@ -1087,7 +1009,8 @@ int thread_client_zeromq(void)
 /*4. 完成后返回结果给 ctrl node*/
 
 
-  pthread_mutex_lock(&mutex_client_msg);			
+  pthread_mutex_lock(&mutex_client_msg);	
+	get_default_settings();	
   motor_en_flag = CTL_CMDINITIAL;
   pthread_mutex_unlock(&mutex_client_msg);
   
@@ -1215,6 +1138,9 @@ void thread_motor_module_run_info(void)
 		pthread_mutex_lock(&mutex_pot);			//获取当前力矩									
 		pot_temp = pot_now;
 		pthread_mutex_unlock(&mutex_pot);		
+		
+		
+		
 		
 		usleep(100000);
 	}	

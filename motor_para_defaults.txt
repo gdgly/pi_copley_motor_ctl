@@ -1,0 +1,11 @@
+max_force=900
+max_position=14000
+zero_position=30000
+preload_position=23000
+max_velocity=800000
+nset_acc=500000
+max_pot=0
+pid_kp=4000.0
+pid_ki=20.0
+pid_umax=100000
+pid_umin=-100000
