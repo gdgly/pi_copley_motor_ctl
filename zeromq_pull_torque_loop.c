@@ -4,7 +4,12 @@
 #define VELOCITY_MODE_MAX_SPEED 1500000
 #define VELOCITY_MODE_MAX_ACC 2000000
 #define SELF_CHECK_POT_VALUE 0.3
+#define SELF_CHECK_FORCE_VALUE 200
 														
+#define PULL_FIX_POSITION 0
+#define PULL_FORCE_TORQUE 1
+
+#define GAIT_B_MODE PULL_FORCE_TORQUE
 														
 int motor_ctl(char *msg, void *para,struct motor_ctl_t *rev,int port);
 
@@ -207,6 +212,7 @@ int motor_ctl(char *msg, void *para,struct motor_ctl_t *rev,int port)
 	char com[20];
 	uint8_t data[256],datagram[64];
 	int *p = para;
+	int try_cmd = 5;
 	int try_t = 1024;
 	struct motor_ctl_t temp;
 
@@ -215,48 +221,49 @@ int motor_ctl(char *msg, void *para,struct motor_ctl_t *rev,int port)
 	}else{
 		sprintf(com,msg,*p);
 	}
-	nwrite = write(port,com,strlen(com));		//发送串口命令
+	while(try_cmd--){
+		nwrite = write(port,com,strlen(com));		//发送串口命令
 	
-	memset(data,'\0',256);
-	while(try_t--)
-	{
-		nread = read(port,datagram,1);	//获取串口命令
-		if(nread<0){
-			return -1;		
-		}
-		if(nread == 0){
-			printf("Communication fail\n");
-			
-			pthread_mutex_lock(&mutex_info);			
-			motor_module_run_info.motor_driver_error++;		//通讯失败错误信息累计
-			pthread_mutex_unlock(&mutex_info); 
-     	     			 	
-			return -1;
-		}
-		data[readcnt] = datagram[0];
-		readcnt++;
-		if(datagram[0]==0x0D){	//最后一位为“\n”判断接收到最后一位后再处理数据
-			memcpy(temp.com,data,sizeof(data));
-//			printf("rev = %s\n",temp.com);
-			if(strstr(temp.com,"v")!=0){	
-
-				sscanf(temp.com,"%*s%d",&temp.temp);
-				if((void*)rev != NULL){
-					memcpy(rev,&temp,sizeof(struct motor_ctl_t));
-				}
-				return 0;
-					
-			}else if(strstr(temp.com,"e")!=0){
-				sscanf(temp.com,"%*s%d",&temp.state);
-				printf("motor error = %d\n",temp.state);
+		memset(data,'\0',256);
+		while(try_t--){
+			nread = read(port,datagram,1);	//获取串口命令
+			if(nread<0){
+				return -1;		
+			}
+			if(nread == 0){
+				printf("Communication fail\n");
 				
 				pthread_mutex_lock(&mutex_info);			
 				motor_module_run_info.motor_driver_error++;		//通讯失败错误信息累计
-				pthread_mutex_unlock(&mutex_info);
-     		return 1;
-			}else if(strstr(temp.com,"ok")!=0){
-				return 0;
-			}	
+				pthread_mutex_unlock(&mutex_info); 
+	     	     			 	
+				return -1;
+			}
+			data[readcnt] = datagram[0];
+			readcnt++;
+			if(datagram[0]==0x0D){	//最后一位为“\n”判断接收到最后一位后再处理数据
+				memcpy(temp.com,data,sizeof(data));
+	//			printf("rev = %s\n",temp.com);
+				if(strstr(temp.com,"v")!=0){	
+
+					sscanf(temp.com,"%*s%d",&temp.temp);
+					if((void*)rev != NULL){
+						memcpy(rev,&temp,sizeof(struct motor_ctl_t));
+					}
+					return 0;
+						
+				}else if(strstr(temp.com,"e")!=0){
+					sscanf(temp.com,"%*s%d",&temp.state);
+					printf("motor error = %d\n",temp.state);
+					
+					pthread_mutex_lock(&mutex_info);			
+					motor_module_run_info.motor_driver_error++;		//通讯失败错误信息累计
+					pthread_mutex_unlock(&mutex_info);
+	     		break;
+				}else if(strstr(temp.com,"ok")!=0){
+					return 0;
+				}	
+			}
 		}
 	}
 	return -1;
@@ -484,8 +491,8 @@ void thread_motor_port(void)
 	float pot_temp;
 	int i,nwrite,index,pndex,nset_acc,max_force_cnt,motor_speed_t,motor_speed_t_old;
 	uint32_t state_temp,state_old,gait_temp,force_temp,max_force;
-	uint32_t time_now,time_mark;
-	int32_t deltav_force,integral_force;
+	uint32_t time_now,time_mark,init_position[10];
+	int32_t deltav_force,integral_force,init_force[10];
 	struct timeval tv;
 	struct timespec ts;
 	int timeout = 1000;
@@ -495,6 +502,14 @@ void thread_motor_port(void)
 
 	MotorPort = tty_init(MOTOR_PORT_NUM);
 	driver_init(MotorPort,MOTOR_PORT_NUM);
+
+	time_t log_time = time(NULL);   
+	struct tm *log_tp = localtime(&log_time);  	
+	char log_path[32];
+	
+	sprintf(log_path,"./motor_log/motor_log_%d_%02d_%02d_%02d%02d.txt",log_tp->tm_year + 1900,log_tp->tm_mon+1,log_tp->tm_mday,log_tp->tm_hour,log_tp->tm_min);
+	FILE *log_fp = fopen(log_path,"w");
+	
 	
 	while(1){
 
@@ -579,13 +594,82 @@ void thread_motor_port(void)
 					
 					}
 					
+					motor_cmd_velocity = 100000;	
+					motor_ctl(SET_VELOCITY,&motor_cmd_velocity,NULL,MotorPort);	
+
+					while(1){
+
+						int32_t init_force_temp[10];
+						uint32_t init_position_temp[10],init_position_overrange;
+						
+						motor_ctl(GET_POSITION,NULL,&motor_position,MotorPort);
+						
+						memcpy(init_force_temp,init_force+1,sizeof(init_force)-4);
+						printf("init_temp = ");
+						for(i=0;i<10;i++){
+							printf("%d ",init_force_temp[i]);	
+						}
+						printf("\n");						
+						memcpy(init_force,init_force_temp,sizeof(init_force)-4);
+						
+						pthread_mutex_lock(&mutex_force);			//互斥锁
+						force_temp = force_now;
+						pthread_mutex_unlock(&mutex_force);	
+																	
+						init_force[9] = SELF_CHECK_FORCE_VALUE - force_temp;
+						printf("init_force = ");
+						for(i=0;i<10;i++){
+							printf("%d ",init_force[i]);	
+						}
+						printf("\n");
+						
+						
+						memcpy(init_position_temp,init_position+1,sizeof(init_position)-4);
+						memcpy(init_position,init_position_temp,sizeof(init_position)-4);												
+						init_position[9] = motor_position.temp;					
+						printf("init_position = ");
+						for(i=0;i<10;i++){
+							printf("%d ",init_position[i]);	
+						}
+						printf("\n");
+						
+						int init_ret;
+						init_ret = 1;
+						for(i=0;i<10;i++){
+							if((abs(init_force[i]) - 25) < 0){
+								init_ret = init_ret&1;
+							}else{
+								init_ret = init_ret&0;
+							}
+						}
+						
+						if(!init_ret){
+														
+							motor_cmd_position =motor_position.temp - init_force[9]*100;
+							printf("what is motor_cmd_position = %d\n",motor_cmd_position);
+							motor_ctl(SET_MOTION,&motor_cmd_position,NULL,MotorPort);
+							motor_ctl(TRAJECTORY_MOVE,NULL,NULL,MotorPort);
+							printf("what is init_force = %d\n",init_force[9]);	
+													
+						}else{
+							motor_ctl(TRAJECTORY_ABORT,NULL,NULL,MotorPort);
+							for(i=0;i<10;i++){
+								init_position_overrange = init_position_overrange + init_position[i];
+							}
+							motor_para_init_temp.preload_position = init_position_overrange/10;
+							printf("what is preload_position = %d\n",motor_para_init_temp.preload_position);
+							break;					
+						}					
+					}
+
 					motor_cmd_velocity = motor_para_init_temp.max_velocity;																		//设置运动速度为14000rpm 此参数需要可以配置
 					motor_ctl(SET_VELOCITY,&motor_cmd_velocity,NULL,MotorPort);					
 
 					motor_cmd_position = motor_para_init_temp.zero_position;
+//					motor_cmd_position = motor_para_init_temp.preload_position;
 					motor_ctl(SET_MOTION,&motor_cmd_position,NULL,MotorPort);
 					motor_ctl(TRAJECTORY_MOVE,NULL,NULL,MotorPort);			
-												
+																	
 					sem_post(&sem_client);
 					printf("this is a test start\n");						
 				}
@@ -657,10 +741,19 @@ void thread_motor_port(void)
 					time_now = (uint32_t)(tv.tv_sec*1000+tv.tv_usec/1000);
 					time_now = (time_now - time_mark)&0x000fffff;	
 
-					printf("%u  motor_position = %d motor_speed = %d\n",time_now,motor_position.temp,motor_speed.temp);
+					pthread_mutex_lock(&mutex_force);			//获取当前力矩									
+					force_temp = force_now;
+					pthread_mutex_unlock(&mutex_force);	
+
+					//printf("%u  motor_position = %d motor_speed = %d\n",time_now,motor_position.temp,motor_speed.temp);
+					printf("time=%u force=%d position=%d\n",time_now,force_temp,motor_position.temp);//time=0 force=123 position=0
+					fprintf(log_fp,"time=%u force=%d position=%d state=%d speed_cmd=%d\n",time_now,force_temp,motor_position.temp,state_temp,0);
 					break;
 						
 					case 02:																//拉扯阶段，此阶段需要快速。因此将此阶段分为两段，一段是直接快速运动，当靠近最大位置时再引入力矩环
+						
+					#if(GAIT_B_MODE==PULL_FORCE_TORQUE)
+					
 					if(state_temp != state_old){
 						
 						motor_ctl(TRAJECTORY_ABORT,NULL,NULL,MotorPort);
@@ -716,8 +809,6 @@ void thread_motor_port(void)
 					
 					index = motor_para_init_temp.pid_ki*index;
 					
-//					motor_speed_t = deltav_force*pndex + index*integral_force*0;
-					printf("what is integral_force : %d\n",integral_force);
 					motor_speed_t = 0-(deltav_force*pndex + index*integral_force);
 					
 					if(motor_speed_t > VELOCITY_MODE_MAX_SPEED)
@@ -733,15 +824,41 @@ void thread_motor_port(void)
 					
 					motor_ctl(SET_VELOCITY_MODE_SPEED,&motor_speed_t,NULL,MotorPort);						
 
-//					if(abs(motor_position.temp - motor_cmd_position) < 100){
-//
-//						max_force = max_force + force_temp;			
-//						max_force_cnt++;		
-//
-//					}										
-					printf("%u motor_speed_t = %d deltav_force = %d \n",time_now,motor_speed_t,deltav_force);
+					printf("time=%u force=%d position=%d\n",time_now,force_temp,motor_position.temp);//time=0 force=123 position=0
+					fprintf(log_fp,"time=%u force=%d position=%d state=%d speed_cmd=%d\n",time_now,force_temp,motor_position.temp,state_temp,motor_speed_t);
 					break;
+					
+					#endif // (GAIT_B_MODE==PULL_FORCE_TORQUE)
+					
+					#if(GAIT_B_MODE==PULL_FIX_POSITION)
+					
+					if(state_temp != state_old){
+						motor_cmd_position = max_position;
+						motor_ctl(SET_MOTION,&motor_cmd_position,NULL,MotorPort);
+						motor_ctl(TRAJECTORY_MOVE,NULL,NULL,MotorPort);
+					}
+					
+					motor_ctl(GET_POSITION,NULL,&motor_position,MotorPort);			
+					gettimeofday(&tv,NULL);
+					time_now = (uint32_t)(tv.tv_sec*1000+tv.tv_usec/1000);
+					time_now = (time_now - time_mark)&0x000fffff;
+					
+					pthread_mutex_lock(&mutex_force);			//获取当前力矩									
+					force_temp = force_now;
+					pthread_mutex_unlock(&mutex_force);					
 						
+					if(abs(motor_position.temp - motor_cmd_position) < 100){
+
+						max_force = max_force + force_temp;			
+						max_force_cnt++;		
+
+					}
+					printf("time=%u force=%d position=%d\n",time_now,force_temp,motor_position.temp);										
+					fprintf(log_fp,"time=%u force=%d position=%d state=%d speed_cmd=%d\n",time_now,force_temp,motor_position.temp,state_temp,0);
+					break;					
+					
+					#endif // (GAIT_B_MODE==PULL_FIX_POSITION)
+					
 					case 03:					//回归零点，这个阶段就是快速就够了
 					if(state_temp != state_old){
 						
@@ -760,37 +877,48 @@ void thread_motor_port(void)
      			 	pthread_mutex_unlock(&mutex_info);  				
 						
 					}
+
+					pthread_mutex_lock(&mutex_force);			//获取当前力矩									
+					force_temp = force_now;
+					pthread_mutex_unlock(&mutex_force);	
+					
 					motor_ctl(GET_ACTUAL_SPEED,NULL,&motor_speed,MotorPort);
 					motor_ctl(GET_POSITION,NULL,&motor_position,MotorPort);
 					gettimeofday(&tv,NULL);
 					time_now = (uint32_t)(tv.tv_sec*1000+tv.tv_usec/1000);
 					time_now = (time_now - time_mark)&0x000fffff;	
-					printf("%u  motor_position = %d motor_speed = %d\n",time_now,motor_position.temp,motor_speed.temp);
+					//printf("%u  motor_position = %d motor_speed = %d\n",time_now,motor_position.temp,motor_speed.temp);
+					printf("time=%u force=%d position=%d\n",time_now,force_temp,motor_position.temp);//time=0 force=123 position=0
+					fprintf(log_fp,"time=%u force=%d position=%d state=%d speed_cmd=%d\n",time_now,force_temp,motor_position.temp,state_temp,0);
 					break;
 					default:
 						usleep(10000);
 					break;
 				}
+				
+				#if(GAIT_B_MODE==PULL_FIX_POSITION)	
+				
+				if((state_temp == 1)&&(state_old == 3)&&(max_force_cnt != 0)){
 					
-//				if((state_temp == 1)&&(state_old == 3)&&(max_force_cnt != 0)){
-//					
-//					gettimeofday(&tv,NULL);
-//					time_now = (uint32_t)(tv.tv_sec*1000+tv.tv_usec/1000);
-//					time_now = (time_now - time_mark)&0x000fffff;	
-//					
-//					max_force = (uint32_t)(max_force/max_force_cnt);
-//					deltav_force = motor_para_init_temp.max_force - max_force;
-//					max_position = max_position - deltav_force*2;
-//					
-//					if(max_position < motor_para_init_temp.max_position - 4000){
-//						max_position = motor_para_init_temp.max_position - 4000;
-//					}else if(max_position > motor_para_init_temp.max_position + 4000){
-//						max_position = motor_para_init_temp.max_position + 4000;
-//					}
-//					
-//					max_force = 0;
-//					max_force_cnt = 0;
-//				}
+					gettimeofday(&tv,NULL);
+					time_now = (uint32_t)(tv.tv_sec*1000+tv.tv_usec/1000);
+					time_now = (time_now - time_mark)&0x000fffff;	
+					
+					max_force = (uint32_t)(max_force/max_force_cnt);
+					deltav_force = motor_para_init_temp.max_force - max_force;
+					max_position = max_position - deltav_force*2;
+					
+					if(max_position < motor_para_init_temp.max_position - 4000){
+						max_position = motor_para_init_temp.max_position - 4000;
+					}else if(max_position > motor_para_init_temp.max_position + 4000){
+						max_position = motor_para_init_temp.max_position + 4000;
+					}
+					
+					max_force = 0;
+					max_force_cnt = 0;
+				}
+				
+				#endif // (GAIT_B_MODE==PULL_FIX_POSITION)
 				state_old = state_temp;
 				break;
 				default:
@@ -799,7 +927,8 @@ void thread_motor_port(void)
 			}
 			motor_en_flag_temp_old = motor_en_flag_temp;
 		}
-	}	
+	}
+	fclose(log_fp);	
 	close(MotorPort);	
 }
 
@@ -838,8 +967,8 @@ void thread_gait_zeromq(void)
 	
 	void *context = zmq_ctx_new ();
 	void *requester = zmq_socket (context, ZMQ_SUB);
-//	zmq_connect (requester, "tcp://localhost:8011");
-    zmq_connect (requester, "tcp://192.168.1.16:8011");
+	zmq_connect (requester, "tcp://localhost:8011");
+//	zmq_connect (requester, "tcp://192.168.1.14:8011");
 //	zmq_connect (requester, "tcp://192.168.1.11:8011");
 	zmq_setsockopt(requester, ZMQ_SUBSCRIBE, "", 0);
 	int request_nbr;
@@ -849,7 +978,7 @@ void thread_gait_zeromq(void)
 		char buffer[1024],temp[32];
 		memset(buffer,0,sizeof(buffer));
 		zmq_recv (requester, buffer, sizeof(buffer), 0);
-		printf("what is rev : %s\n",buffer);
+//		printf("what is rev : %s\n",buffer);
 		s = zeromq_msg_getdata(buffer,GAIT,sizeof(GAIT));
 		if(s != NULL){
 		
@@ -996,7 +1125,7 @@ int thread_client_zeromq(void)
 	void *context = zmq_ctx_new ();
 	void *responder = zmq_socket (context, ZMQ_REP);
 	int rc = zmq_bind (responder,"tcp://*:8000");
-	printf("what is rc %d\n",rc);
+//	printf("what is rc %d\n",rc);
 	assert (rc == 0);
 
 
@@ -1028,7 +1157,7 @@ int thread_client_zeromq(void)
 		/* 1.电机启动，准备就绪，等待接受控制模块初始化指令*/
 		printf("this is a test client\n");	
 		zmq_recv (responder,&cmdmotormsg,sizeof(cmdmotormsg),0);
-		printf("what is rev : %d  %d \n",cmdmotormsg.nodeID,cmdmotormsg.opt);
+//		printf("what is rev : %d  %d \n",cmdmotormsg.nodeID,cmdmotormsg.opt);
 		
 		if(cmdmotormsg.nodeID == NODEID_OF_MOTOR){
 		
@@ -1138,9 +1267,6 @@ void thread_motor_module_run_info(void)
 		pthread_mutex_lock(&mutex_pot);			//获取当前力矩									
 		pot_temp = pot_now;
 		pthread_mutex_unlock(&mutex_pot);		
-		
-		
-		
 		
 		usleep(100000);
 	}	
