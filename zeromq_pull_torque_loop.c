@@ -563,10 +563,16 @@ void thread_motor_port(void)
 						if((sem_timedwait(&sem_pot_check,&ts) == 0)&&(sem_timedwait(&sem_force_check,&ts) == 0)){
 							printf("success get senser data\n");
 							pthread_mutex_lock(&mutex_info);
-							motor_module_check_info.motor_module_check_results = 0;
+							motor_module_check_info.motor_module_check_results = on_checking;
 							pthread_mutex_unlock(&mutex_info);
 						}else{
 							printf("motor module self check abort:can not get senser data\n");
+							pthread_mutex_lock(&mutex_info);
+							motor_module_check_info.motor_module_check_results = no_sensor_data;
+							pthread_mutex_unlock(&mutex_info);
+							is_check = 1;																	
+							sem_post(&sem_client);
+							break;														
 						}						
 					}					
 					
@@ -583,8 +589,11 @@ void thread_motor_port(void)
 
 					motor_cmd_velocity = 200000;																		//设置运动速度为14000rpm 此参数需要可以配置
 					motor_ctl(SET_VELOCITY,&motor_cmd_velocity,NULL,MotorPort);	
+
+					//寻零自检，循环次数超过100次认为无法达到					
+					uint16_t pot_value_try = 200;
 										
-					while(1){
+					while(pot_value_try--){
 						
 						nwrite = ENABLE_POSITION_MODE;
 						motor_ctl(SET_DESIRED_STATE,&nwrite,NULL,MotorPort);
@@ -600,22 +609,65 @@ void thread_motor_port(void)
 							motor_cmd_position =motor_position.temp - (SELF_CHECK_POT_VALUE - pot_temp)*10000;
 							motor_ctl(SET_MOTION,&motor_cmd_position,NULL,MotorPort);
 							motor_ctl(TRAJECTORY_MOVE,NULL,NULL,MotorPort);				
-							printf("what is pot_temp: %f\n",pot_temp);
+							printf("what is pot_temp: %f pot_value_try:%d\n",pot_temp,pot_value_try);
 						
 						}else{
 							motor_ctl(TRAJECTORY_ABORT,NULL,NULL,MotorPort);	
 							nwrite = 35000;
 							motor_ctl(SET_POSITION,&nwrite,NULL,MotorPort);
-							printf("what is pot_temp: %f\n",pot_temp);
+							printf("what is pot_temp: %f try_cnt:%d\n",pot_temp,200 - pot_value_try);
 							break;
 						}
 					
 					}
 					
-					motor_cmd_velocity = 100000;	
+					if(pot_value_try <= 0){
+						printf("motor module self check abort:can not reach zero position\n");
+						pthread_mutex_lock(&mutex_info);
+						motor_module_check_info.motor_module_check_results = unreachable_zero_position;
+						pthread_mutex_unlock(&mutex_info);
+						is_check = 1;																	
+						sem_post(&sem_client);
+						break;								
+					}
+					
+					motor_cmd_velocity = 100000;
 					motor_ctl(SET_VELOCITY,&motor_cmd_velocity,NULL,MotorPort);	
 
+					//预紧力点自适应，电位计位置超出或者循环超过1分钟，认为自检失败
+
+					uint32_t init_mark;
+					
+					gettimeofday(&tv,NULL);						
+					init_mark = (uint32_t)(tv.tv_sec*1000+tv.tv_usec/1000);
+					init_mark = (init_mark - time_mark)&0x000fffff;						
+
 					while(1){
+						
+						pthread_mutex_lock(&mutex_pot);			//互斥锁
+						pot_temp = pot_now;
+						pthread_mutex_unlock(&mutex_pot);	
+						gettimeofday(&tv,NULL);
+						
+						time_now = (uint32_t)(tv.tv_sec*1000+tv.tv_usec/1000);
+						time_now = (time_now - time_mark)&0x000fffff;	
+						
+						if((pot_temp>0.1)&&(pot_temp<2.5)&&((time_now - init_mark) < 60000)){
+								
+						}else{
+							printf("motor module self check abort:can not reach preload position\n");
+							
+							motor_cmd_position = motor_para_init_temp.zero_position;
+							motor_ctl(SET_MOTION,&motor_cmd_position,NULL,MotorPort);
+							motor_ctl(TRAJECTORY_MOVE,NULL,NULL,MotorPort);		
+							
+							pthread_mutex_lock(&mutex_info);
+							motor_module_check_info.motor_module_check_results = unreachable_preload_position;
+							pthread_mutex_unlock(&mutex_info);
+							is_check = 1;																	
+							sem_post(&sem_client);
+							break;													
+						}
 
 						int32_t init_force_temp[10];
 						uint32_t init_position_temp[10],init_position_overrange;
@@ -679,7 +731,14 @@ void thread_motor_port(void)
 							break;					
 						}					
 					}
+					
+					if(is_check == 1){
+						break;	
+					}
 
+
+					//自检成功配置参数
+					
 					motor_cmd_velocity = motor_para_init_temp.max_velocity;																		//设置运动速度为14000rpm 此参数需要可以配置
 					motor_ctl(SET_VELOCITY,&motor_cmd_velocity,NULL,MotorPort);					
 
@@ -690,7 +749,7 @@ void thread_motor_port(void)
 					
 					pthread_mutex_lock(&mutex_info);
 					sprintf(motor_module_check_info.motor_state,"%s",MOTOR_OK);
-					motor_module_check_info.motor_module_check_results = 1;
+					motor_module_check_info.motor_module_check_results = module_check_success;
 					pthread_mutex_unlock(&mutex_info);
 
 					is_check = 1;																	
@@ -1195,15 +1254,15 @@ int thread_client_zeromq(void)
 
 	    if(sem_timedwait(&sem_client,&ts) == 0){
 	      pthread_mutex_lock(&mutex_info);
-				if(motor_module_check_info.motor_module_check_results == 1){
-					sprintf(rawdata,"evtmotorIntialok");
+				if(motor_module_check_info.motor_module_check_results == module_check_success){
+					sprintf(rawdata,"Initialsuccess");
 				}else{
-					sprintf(rawdata,"evtmotorIntialfail1");
+					sprintf(rawdata,"initialerrorID:%d",motor_module_check_info.motor_module_check_results);
 				}
 				pthread_mutex_unlock(&mutex_info);
 
 			}else{
-				sprintf(rawdata,"evtmotorIntialfail2");
+				sprintf(rawdata,"initialerrorID");
 			}
 		}else if(strstr(buffer,"cmdmotorshutdown")!=NULL){
 
@@ -1217,9 +1276,9 @@ int thread_client_zeromq(void)
 	    sem_post(&sem_motor);
 
 	    if(sem_timedwait(&sem_client,&ts)==0){
-				sprintf(rawdata,"evtmotorshutdownok");
+				sprintf(rawdata,"shutdownsuccess");
 			}else{
-				sprintf(rawdata,"evtmotorshutdownfail");
+				sprintf(rawdata,"shutdownerrorID");
 			}
 
 		}else if(strstr(buffer,"cmdmotorstop")!=NULL){
@@ -1234,9 +1293,9 @@ int thread_client_zeromq(void)
 	    sem_post(&sem_motor);
 
 	    if(sem_timedwait(&sem_client,&ts) == 0){
-				sprintf(rawdata,"evtmotorstopok");
+				sprintf(rawdata,"stopsuccess");
 			}else{
-				sprintf(rawdata,"evtmotorstopfail");
+				sprintf(rawdata,"stoperrorID");
 			}
 
 		}else if(strstr(buffer,"cmdmotorpause")!=NULL){
@@ -1251,9 +1310,9 @@ int thread_client_zeromq(void)
 	    sem_post(&sem_motor);
 
 	    if(sem_timedwait(&sem_client,&ts) == 0){
-				sprintf(rawdata,"evtmotorpauseok");
+				sprintf(rawdata,"pausesuccess");
 			}else{
-				sprintf(rawdata,"evtmotorpausefail");
+				sprintf(rawdata,"pauseerrorID");
 			}
 
 		}else if(strstr(buffer,"cmdmotorstart")!=NULL){
@@ -1268,14 +1327,14 @@ int thread_client_zeromq(void)
 	    sem_post(&sem_motor);
 
 	    if(sem_timedwait(&sem_client,&ts) == 0){
-				sprintf(rawdata,"evtmotorstartok");
+				sprintf(rawdata,"startsuccess");
 			}else{
-				sprintf(rawdata,"evtmotorstartfail");
+				sprintf(rawdata,"starterrorID");
 			}
 
-		}else if(strstr(buffer,"cmdmotorforceid")!=NULL){
+		}else if(strstr(buffer,"cmdmotorforceaid")!=NULL){
 
-			s = zeromq_msg_getdata(buffer,"cmdmotorforceid",sizeof("cmdmotorforceid"));
+			s = zeromq_msg_getdata(buffer,"cmdmotorforceaid",sizeof("cmdmotorforceaid"));
 			if(s!=NULL){
 				sprintf(forceaid_str,"%s",s);
 				sscanf(forceaid_str,"%d",&forceaid_temp);
@@ -1284,10 +1343,10 @@ int thread_client_zeromq(void)
 	    pthread_mutex_lock(&mutex_client_msg);
 
 	    pthread_mutex_unlock(&mutex_client_msg);
-	    sprintf(rawdata,"evtmotorforceid:%d",forceaid_temp);
+	    sprintf(rawdata,"setforceaidsuccess");
 
 		}else{
-			sprintf(rawdata,"evtmotorrevunknow",forceaid_temp);
+			sprintf(rawdata,"setforceaiderrorID");
 		}
 
 		zmq_send(responder,rawdata,strlen(rawdata),0);

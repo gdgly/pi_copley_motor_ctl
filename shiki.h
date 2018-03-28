@@ -33,6 +33,15 @@ struct motor_module_check_info_t{
 	uint32_t motor_module_check_results;	
 };
 
+enum check_results_t{
+	on_checking = 1,
+	no_sensor_data ,
+	unreachable_zero_position,
+	unreachable_preload_position,
+	module_check_success,
+	check_results_max
+};
+
 
 #define SENSER_OK					"sensor_ok"
 #define SENSER_NO_PORT		"sensor_noport"
