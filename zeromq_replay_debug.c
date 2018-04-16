@@ -534,7 +534,7 @@ void thread_motor_port(void)
                         ts.tv_sec += ts.tv_nsec/(1000*1000*1000);
                         ts.tv_nsec %= (1000*1000*1000);
 
-                        if(motor_en_flag_temp_old == 0){
+/*                        if(motor_en_flag_temp_old == 0){
                             if((sem_timedwait(&sem_pot_check,&ts) == 0)&&(sem_timedwait(&sem_force_check,&ts) == 0)){
                                 printf("success get senser data\n");
                                 pthread_mutex_lock(&mutex_info);
@@ -549,7 +549,7 @@ void thread_motor_port(void)
                                 sem_post(&sem_client);
                                 break;
                             }
-                        }
+                        }*/
 
                         nwrite = VELOCITY_MODE_MAX_ACC;
                         motor_ctl(SET_VELOCITY_ACC,&nwrite,NULL,MotorPort);
@@ -566,7 +566,7 @@ void thread_motor_port(void)
                         motor_ctl(SET_VELOCITY,&motor_cmd_velocity,NULL,MotorPort);
 
                         //寻零自检，循环次数超过100次认为无法达到
-                        int pot_value_try = 200;
+/*                        int pot_value_try = 200;
 
                         while(pot_value_try--){
 
@@ -604,7 +604,7 @@ void thread_motor_port(void)
                             is_check = 1;
                             sem_post(&sem_client);
                             break;
-                        }
+                        }*/
 
                         motor_cmd_velocity = 100000;
                         motor_ctl(SET_VELOCITY,&motor_cmd_velocity,NULL,MotorPort);
@@ -1198,26 +1198,26 @@ int thread_client_zeromq(void)
 //	get_default_settings();
 //    pthread_mutex_unlock(&mutex_client_msg);
 
-//    motor_en_flag_temp = CTL_CMDINITIAL;
-//    pthread_mutex_lock(&mutex_client_msg);
-//    get_default_settings();
-//    motor_en_flag = motor_en_flag_temp;
-//    pthread_mutex_unlock(&mutex_client_msg);
-//
-//    sem_post(&sem_motor);
-//    sem_wait(&sem_client);
-//
-//    sleep(2);
-//
-//    if(motor_module_check_info.motor_module_check_results == module_check_success){
-//        motor_en_flag_temp = CTL_CMDMOTIONSTART;
-//        pthread_mutex_lock(&mutex_client_msg);
-//        motor_en_flag = motor_en_flag_temp;
-//        pthread_mutex_unlock(&mutex_client_msg);
-//        sprintf(rawdata,"initialsuccess");
-//    }else{
-//        sprintf(rawdata,"initialerrorID:%d",motor_module_check_info.motor_module_check_results);
-//    }
+    motor_en_flag_temp = CTL_CMDINITIAL;
+    pthread_mutex_lock(&mutex_client_msg);
+    get_default_settings();
+    motor_en_flag = motor_en_flag_temp;
+    pthread_mutex_unlock(&mutex_client_msg);
+
+    sem_post(&sem_motor);
+    sem_wait(&sem_client);
+
+    sleep(2);
+
+    if(motor_module_check_info.motor_module_check_results == module_check_success){
+        motor_en_flag_temp = CTL_CMDMOTIONSTART;
+        pthread_mutex_lock(&mutex_client_msg);
+        motor_en_flag = motor_en_flag_temp;
+        pthread_mutex_unlock(&mutex_client_msg);
+        sprintf(rawdata,"initialsuccess");
+    }else{
+        sprintf(rawdata,"initialerrorID:%d",motor_module_check_info.motor_module_check_results);
+    }
 
     //  Socket to talk to clients
     void *context = zmq_ctx_new ();
