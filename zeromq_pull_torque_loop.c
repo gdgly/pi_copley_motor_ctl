@@ -20,23 +20,22 @@
 #define VELOCITY_MODE_MAX_SPEED 1500000
 #define VELOCITY_MODE_MAX_ACC 2000000
 #define SELF_CHECK_FORCE_VALUE 200
-#define MOTOR_ENCODER_DIRECTION 1
 
 #define PROTECTION_FORCE_VALUE 2000                 //超过200N自动保护
 #define PROTECTION_POT_VALUE_H 3.29                  //电位计保护最大3.2
 #define PROTECTION_POT_VALUE_L 0.01                  //电位计保护最小0.01
 
-
 #define PULL_FIX_POSITION 0                         //固定位置模式
 #define PULL_FORCE_TORQUE 1                         //力矩还模式
 #define PULL_FORCE_TORQUE_TEST 2                    //力矩环，测试用
+#define STUDY_WALKING_POSITON 3						//测试人行走位置变化
 
-#define GAIT_B_MODE PULL_FORCE_TORQUE
+#define GAIT_B_MODE STUDY_WALKING_POSITON
 
 #define DEBUG 0                                     //测试用
 #define REAL 1
 
-#define RUN_MOTION REAL
+#define RUN_MOTION DEBUG
 
 #define MOTOR_EN_TRUE 1
 #define MOTOR_EN_FALSE 0
@@ -370,7 +369,7 @@ void main()
     }
 }
 
-#if(RUN_MOTION == REAL)
+#if((RUN_MOTION == REAL)||(GAIT_B_MODE == STUDY_WALKING_POSITON))
 
 //力传感器读取线程
 void thread_force_port(void)
@@ -440,7 +439,7 @@ void thread_force_port(void)
 
 #endif
 
-#if(RUN_MOTION == DEBUG)
+#if((RUN_MOTION == DEBUG)&&(GAIT_B_MODE != STUDY_WALKING_POSITON))
 //力传感器读取线程
 void thread_force_port(void)
 {
@@ -801,7 +800,7 @@ void thread_motor_port(void)
                             sem_post(&sem_client);
                             break;
                         }
-#if(RUN_MOTION == REAL)
+#if((RUN_MOTION == REAL)||(GAIT_B_MODE == STUDY_WALKING_POSITON))
                         motor_cmd_velocity = 100000;
                         motor_ctl(SET_VELOCITY,&motor_cmd_velocity,NULL,MotorPort);
 
@@ -877,7 +876,7 @@ void thread_motor_port(void)
                             int init_ret;
                             init_ret = 1;
                             for(i=0;i<10;i++){
-                                if((abs(init_force[i]) - 25) < 0){
+                                if((abs(init_force[i]) - 50) < 0){
                                     init_ret = init_ret&1;
                                 }else{
                                     init_ret = init_ret&0;
@@ -916,7 +915,7 @@ void thread_motor_port(void)
                             break;
                         }
 
-
+#endif
                         //自检成功配置参数
 
                         motor_cmd_velocity = 1400000;																		//设置运动速度为14000rpm 此参数需要可以配置
@@ -988,9 +987,14 @@ void thread_motor_port(void)
                         motor_ctl(SET_DESIRED_STATE,&nwrite,NULL,MotorPort);
                         sem_post(&sem_client);
                     }
+
                     pthread_mutex_lock(&mutex_gait_msg);					//获取电机运动状态，socket
                     state_temp = state_now;
                     pthread_mutex_unlock(&mutex_gait_msg);
+
+#if(GAIT_B_MODE == STUDY_WALKING_POSITON)
+                    state_temp = 2;
+#endif
 
                     switch(state_temp){
                     case 01:																//预紧点，不能是单个位置点，需要在合适的步态和力矩下开始运动
@@ -1027,11 +1031,43 @@ void thread_motor_port(void)
 
                     case 02:																//拉扯阶段，此阶段需要快速。因此将此阶段分为两段，一段是直接快速运动，当靠近最大位置时再引入力矩环
 
+#if(GAIT_B_MODE==STUDY_WALKING_POSITON)					
+                        if(state_temp != state_old){
+                            motor_ctl(TRAJECTORY_ABORT,NULL,NULL,MotorPort);
+                            nwrite = ENABLE_VELOCITY_MODE;
+                            motor_ctl(SET_DESIRED_STATE,&nwrite,NULL,MotorPort);
+                        }
+
+                        motor_ctl(GET_POSITION,NULL,&motor_position,MotorPort);
+
+                        pthread_mutex_lock(&mutex_force);			//获取当前力矩
+                        force_temp = force_now;
+                        pthread_mutex_unlock(&mutex_force);
+
+                        deltav_force = 300 - force_now;
+
+                        motor_speed_t = -6000*deltav_force;
+
+                        if((deltav_force < 10)&&(deltav_force >-10)){
+                            motor_speed_t = 0;
+                        }
+
+                        motor_ctl(SET_VELOCITY_MODE_SPEED,&motor_speed_t,NULL,MotorPort);
+
+                        gettimeofday(&tv,NULL);
+                        time_now = (uint32_t)(tv.tv_sec*1000+tv.tv_usec/1000);
+                        time_now = (time_now - time_mark)&0x000fffff;
+                        printf("time=%u force=%d position=%d\n",time_now,force_temp,motor_position.temp);
+                        break;
+
+#endif					
+					
+					
 #if(GAIT_B_MODE==PULL_FORCE_TORQUE_TEST)
                         if(state_temp != state_old){
                             motor_ctl(TRAJECTORY_ABORT,NULL,NULL,MotorPort);
 
-                            motor_cmd_velocity = motor_para_init_temp.max_velocity;																		//设置运动速度为14000rpm 此参数需要可以配置
+                            motor_cmd_velocity = motor_para_init_temp.max_velocity;																		
                             motor_ctl(SET_VELOCITY,&motor_cmd_velocity,NULL,MotorPort);
 
                             nwrite = ENABLE_VELOCITY_MODE;
@@ -1061,23 +1097,22 @@ void thread_motor_port(void)
                             motor_speed_t = 0;
                         }
 
-                        if(motor_speed_t < -2800000){
-                            motor_speed_t = -2800000;
+                        if(motor_speed_t < -1600000){															//根据不同的人，设置不同的速度？
+                            motor_speed_t = -1600000;
                         }
 
-                        if(motor_speed_t > 2800000){
-                            motor_speed_t = 2800000;
+                        if(motor_speed_t > 1600000){
+                            motor_speed_t = 1600000;
                         }
                         printf("what is para %d %d %d %f\n",motor_speed_t,deltav_force,motor_speed.temp,pot_temp);
                         motor_ctl(SET_VELOCITY_MODE_SPEED,&motor_speed_t,NULL,MotorPort);
-                        motor_ctl(GET_CURRENT,NULL,&motor_current,MotorPort);
                         motor_position.temp = ((2.61 - pot_temp)/2.31)*35000;
                         gettimeofday(&tv,NULL);
                         time_now = (uint32_t)(tv.tv_sec*1000+tv.tv_usec/1000);
                         time_now = (time_now - time_mark)&0x000fffff;
                         printf("time=%u force=%d position=%d\n",time_now,force_temp,motor_position.temp);
 #if(RUN_MOTION == REAL)
-                        fprintf(log_fp,"time=%u force=%d position=%d state=%d speed_cmd=%d current=%d\n",time_now,force_temp,motor_position.temp,state_temp,0,motor_current.temp);
+                        fprintf(log_fp,"time=%u force=%d position=%d state=%d speed_cmd=%d\n",time_now,force_temp,motor_position.temp,state_temp,0);
 #endif
                         break;
 #endif          //PULL_FORCE_TORQUE_TEST
@@ -1096,7 +1131,7 @@ void thread_motor_port(void)
                         }
 
                         motor_ctl(GET_POSITION,NULL,&motor_position,MotorPort);
-                        //					motor_ctl(GET_ACTUAL_SPEED,NULL,&motor_speed,MotorPort);
+                        //motor_ctl(GET_ACTUAL_SPEED,NULL,&motor_speed,MotorPort);
 
 
                         pthread_mutex_lock(&mutex_force);			//获取当前力矩
@@ -1530,7 +1565,7 @@ int thread_client_zeromq(void)
     //	printf("what is rc %d\n",rc);
     assert (rc == 0);
 
-
+	
     while(zmq_client_try){
 
         zmq_recv(responder,buffer,sizeof(buffer),0);
