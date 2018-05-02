@@ -4,27 +4,29 @@
 #define DESKTOP_VERSION 0                           //桌面版
 #define EXOSUIT_VERSION 1                           //穿戴版
 
-#define ENCODE_1MM 325								//1mm对应的电位计计数
+#define ENCODE_1MM 325								//1mm对应的电位计计数  325
+#define SELF_CHECK_ADJUST_MM 30							//自检对应的最大调整位置 mm
+#define MOTION_ADJUST_MM 10									//自适应对应的最大调制位置 mm
 
 
 #define WHERE_MOTION DESKTOP_VERSION
 
 #if(WHERE_MOTION == EXOSUIT_VERSION)
-#define SELF_CHECK_POT_VALUE 3.0
-#define ENCODER_DEFUALT_POSITON 50000
+#define SELF_CHECK_POT_VALUE 2.5
+#define ENCODER_DEFUALT_POSITON 30000
 #define MOTOR_ENCODER_DIRECTION 1
-#define POT_VALUE_LONG 	1.90						//波登线拉到最长时电位计的数据
-#define POT_VALUE_SHORT 2.10						//波登线拉到最短时电位计的数据
+#define POT_VALUE_LONG 	1.55						//波登线拉到最长时电位计的数据
+#define POT_VALUE_SHORT 3.05						//波登线拉到最短时电位计的数据
 #endif
 
 #if(WHERE_MOTION == DESKTOP_VERSION)
-#define SELF_CHECK_POT_VALUE 0.3
-#define ENCODER_DEFUALT_POSITON 35000
+#define SELF_CHECK_POT_VALUE 0.3					//自检到达的位置
+#define ENCODER_DEFUALT_POSITON 35000				//自检设置的编码器取值
 #endif
 
-#define VELOCITY_MODE_MAX_SPEED 1500000
+#define VELOCITY_MODE_MAX_SPEED 1500000			
 #define VELOCITY_MODE_MAX_ACC 2000000
-#define SELF_CHECK_FORCE_VALUE 200
+#define SELF_CHECK_FORCE_VALUE 200					//自检对应的预紧力值
 
 #define PROTECTION_FORCE_VALUE 2000                 //超过200N自动保护
 #define PROTECTION_POT_VALUE_H 3.15                  //电位计保护最大3.2
@@ -51,7 +53,7 @@
 
 #define SYSTEM_OFF 0
 #define SYSTEM_ON 1
-#define SYSTEM_CLIENT_TEST SYSTEM_OFF
+#define SYSTEM_CLIENT_TEST SYSTEM_OFF				//是否接收系统模块的通讯
 
 #define CHANGE_PRELOAD_POSITION 1   				//0 不启用  1 启用    自适应调整预紧力位置
 
@@ -943,14 +945,14 @@ void thread_motor_port(void)
                                 delatv_preload = init_position_overrange/10 - motor_para_init_temp.preload_position;
                                 motor_para_init_temp.preload_position = delatv_preload + motor_para_init_temp.preload_position;
 
-                                if(motor_para_init_temp.preload_position > motor_para_init_rawdata.preload_position + 10*ENCODE_1MM){
-                                    motor_para_init_temp.preload_position = motor_para_init_rawdata.preload_position + 10*ENCODE_1MM;
-                                    motor_para_init_temp.zero_position = motor_para_init_rawdata.zero_position + 10*ENCODE_1MM;
-                                    motor_para_init_temp.max_position = motor_para_init_rawdata.max_position + 10*ENCODE_1MM;
-                                }else if(motor_para_init_temp.preload_position < preload_position_rawdata - 10*ENCODE_1MM){
-                                    motor_para_init_temp.preload_position = preload_position_rawdata - 10*ENCODE_1MM;
-                                    motor_para_init_temp.zero_position = motor_para_init_rawdata.zero_position - 10*ENCODE_1MM;
-                                    motor_para_init_temp.max_position = motor_para_init_rawdata.max_position - 10*ENCODE_1MM;
+                                if(motor_para_init_temp.preload_position > motor_para_init_rawdata.preload_position + SELF_CHECK_ADJUST_MM*ENCODE_1MM){
+                                    motor_para_init_temp.preload_position = motor_para_init_rawdata.preload_position + SELF_CHECK_ADJUST_MM*ENCODE_1MM;
+                                    motor_para_init_temp.zero_position = motor_para_init_rawdata.zero_position + SELF_CHECK_ADJUST_MM*ENCODE_1MM;
+                                    motor_para_init_temp.max_position = motor_para_init_rawdata.max_position + SELF_CHECK_ADJUST_MM*ENCODE_1MM;
+                                }else if(motor_para_init_temp.preload_position < preload_position_rawdata - SELF_CHECK_ADJUST_MM*ENCODE_1MM){
+                                    motor_para_init_temp.preload_position = preload_position_rawdata - SELF_CHECK_ADJUST_MM*ENCODE_1MM;
+                                    motor_para_init_temp.zero_position = motor_para_init_rawdata.zero_position - SELF_CHECK_ADJUST_MM*ENCODE_1MM;
+                                    motor_para_init_temp.max_position = motor_para_init_rawdata.max_position - SELF_CHECK_ADJUST_MM*ENCODE_1MM;
                                 }else{
                                     motor_para_init_temp.zero_position = delatv_preload + motor_para_init_temp.zero_position;
                                     motor_para_init_temp.max_position = delatv_preload + motor_para_init_temp.max_position;
@@ -1335,14 +1337,14 @@ void thread_motor_port(void)
                             }
 
                             motor_para_init_temp.preload_position = delatv_preload + motor_para_init_temp.preload_position;
-                            if(motor_para_init_temp.preload_position > motor_para_init_rawdata.preload_position + 10*ENCODE_1MM){
-                                motor_para_init_temp.preload_position = motor_para_init_rawdata.preload_position + 10*ENCODE_1MM;
-                                motor_para_init_temp.zero_position = motor_para_init_rawdata.zero_position + 10*ENCODE_1MM;
-                                motor_para_init_temp.max_position = motor_para_init_rawdata.max_position + 10*ENCODE_1MM;
-                            }else if(motor_para_init_temp.preload_position <motor_para_init_rawdata.preload_position - 10*ENCODE_1MM){
-                                motor_para_init_temp.preload_position = motor_para_init_rawdata.preload_position - 10*ENCODE_1MM;
-                                motor_para_init_temp.zero_position = motor_para_init_rawdata.zero_position - 10*ENCODE_1MM;
-                                motor_para_init_temp.max_position = motor_para_init_rawdata.max_position - 10*ENCODE_1MM;
+                            if(motor_para_init_temp.preload_position > motor_para_init_rawdata.preload_position + MOTION_ADJUST_MM*ENCODE_1MM){
+                                motor_para_init_temp.preload_position = motor_para_init_rawdata.preload_position + MOTION_ADJUST_MM*ENCODE_1MM;
+                                motor_para_init_temp.zero_position = motor_para_init_rawdata.zero_position + MOTION_ADJUST_MM*ENCODE_1MM;
+                                motor_para_init_temp.max_position = motor_para_init_rawdata.max_position + MOTION_ADJUST_MM*ENCODE_1MM;
+                            }else if(motor_para_init_temp.preload_position <motor_para_init_rawdata.preload_position - MOTION_ADJUST_MM*ENCODE_1MM){
+                                motor_para_init_temp.preload_position = motor_para_init_rawdata.preload_position - MOTION_ADJUST_MM*ENCODE_1MM;
+                                motor_para_init_temp.zero_position = motor_para_init_rawdata.zero_position - MOTION_ADJUST_MM*ENCODE_1MM;
+                                motor_para_init_temp.max_position = motor_para_init_rawdata.max_position - MOTION_ADJUST_MM*ENCODE_1MM;
                             }else{
                                 motor_para_init_temp.zero_position = delatv_preload + motor_para_init_temp.zero_position;
                                 motor_para_init_temp.max_position = delatv_preload + motor_para_init_temp.max_position;
@@ -1459,8 +1461,8 @@ void thread_gait_zeromq(void)
     //zmq_connect (requester, "tcp://192.168.1.11:8011");
     zmq_setsockopt(requester, ZMQ_SUBSCRIBE, "", 0);
     int zmq_gait_try = 1024;
-    char* s;
-
+    char* s, *r;
+    char *ptr, *str, *gaitl, *gaitr, gait;
 
     while (zmq_gait_try) {
         char buffer[1024],temp[32];
@@ -1488,14 +1490,35 @@ void thread_gait_zeromq(void)
 //                state_temp = 3;
 //             }
 
+#if(RUN_MOTION == REAL)
+            ptr = s;
+            while((str=strtok_r(ptr,",",&r))!=NULL){
+                if(strcmp(str,"GaitL:") >= 0){
+                    if(strstr(str, "GaitL:A")!=NULL){
+                        state_temp = 1;
+                    }else if(strstr(str, "GaitL:B")!=NULL){
+                        state_temp = 2;
+                    }else if(strstr(str, "GaitL:C")!=NULL){
+                        state_temp = 3;
+                    }
+                }else if(strcmp(str,"GaitR:") >= 0){
 
+                }else if(strcmp(str,"Gait:") >= 0){
+
+                }
+                ptr = NULL;
+            }
+            r = NULL;
+#endif
+
+#if(RUN_MOTION == DEBUG)
             if(*s == 0x41)
                 state_temp = 1;
             else if(*s == 0x42)
                 state_temp = 2;
             else if(*s == 0x43)
                 state_temp = 3;
-
+#endif
             pthread_mutex_lock(&mutex_gait_msg);
             state_now = state_temp;
             pthread_mutex_unlock(&mutex_gait_msg);
