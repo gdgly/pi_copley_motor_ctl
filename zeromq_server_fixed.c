@@ -25,4 +25,4 @@ int main (void)
 //	zmq_send (responder, "Gait:N", 6, 0);
 	}
 	return 0;
-}
+}11111111111111
