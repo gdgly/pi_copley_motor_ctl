@@ -758,7 +758,7 @@ void thread_motor_port(void)
                         if(motor_state_flag_temp_old == 0){
                             int ret1 = sem_timedwait(&sem_pot_check,&ts);
                             int ret2 = sem_timedwait(&sem_force_check,&ts);
-                            printf("hello %d %d\n",ret1,ret2);
+                            printf("check reualt: %d %d\n",ret1,ret2);
 
                             if((ret1 == 0)&&(ret2 == 0)){
                                 printf("success get senser data\n");
@@ -1444,6 +1444,22 @@ char* zeromq_msg_getdata(char* msg,char *type,uint8_t len)
     return NULL;
 }
 
+char *strtrim_user(char *s){
+
+	char *p = s;
+	char *q = s;
+	while(*p != '\0'){
+		if(*p != ' '){
+			*q++ = *p++;
+		}else{
+			*p++;		
+		}	
+
+	}
+	*(q+1) = '\0';
+	return s;
+}
+
 
 //socket通讯线程，处理获取到的数据。
 void thread_gait_zeromq(void)
@@ -1461,16 +1477,16 @@ void thread_gait_zeromq(void)
     //zmq_connect (requester, "tcp://192.168.1.11:8011");
     zmq_setsockopt(requester, ZMQ_SUBSCRIBE, "", 0);
     int zmq_gait_try = 1024;
-    char* s, *r;
-    char *ptr, *str, *gaitl, *gaitr, gait;
+    char *r;
+    char *ptr, *str;
 
     while (zmq_gait_try) {
         char buffer[1024],temp[32];
         memset(buffer,0,sizeof(buffer));
         zmq_recv (requester, buffer, sizeof(buffer), 0);
         //printf("what is rev : %s\n",buffer);
-        s = zeromq_msg_getdata(buffer,GAIT,sizeof(GAIT));
-        if(s != NULL){
+
+        if(buffer != NULL){
 
 //             if((*s == 0x41)&&(state_temp_old == 3)){				//"A" 只有在处于C且收到A的时候才会进入A
 //                state_temp = 1;
@@ -1490,8 +1506,8 @@ void thread_gait_zeromq(void)
 //                state_temp = 3;
 //             }
 
-#if(RUN_MOTION == REAL)
-            ptr = s;
+            ptr = buffer;
+			strtrim_user(ptr);
             while((str=strtok_r(ptr,",",&r))!=NULL){
                 if(strcmp(str,"GaitL:") >= 0){
                     if(strstr(str, "GaitL:A")!=NULL){
@@ -1509,16 +1525,7 @@ void thread_gait_zeromq(void)
                 ptr = NULL;
             }
             r = NULL;
-#endif
 
-#if(RUN_MOTION == DEBUG)
-            if(*s == 0x41)
-                state_temp = 1;
-            else if(*s == 0x42)
-                state_temp = 2;
-            else if(*s == 0x43)
-                state_temp = 3;
-#endif
             pthread_mutex_lock(&mutex_gait_msg);
             state_now = state_temp;
             pthread_mutex_unlock(&mutex_gait_msg);
