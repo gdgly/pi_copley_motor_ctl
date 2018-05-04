@@ -57,6 +57,11 @@
 
 #define CHANGE_PRELOAD_POSITION 1   				//0 不启用  1 启用    自适应调整预紧力位置
 
+
+#define MOTION_MODE_GAIT 1
+#define MOTION_MODE_FIXED 2
+#define MOTION_MODE_RELAX 3
+
 volatile int32_t EnableFlag = MOTOR_EN_TRUE;
 
 int motor_ctl(char *msg, void *para,struct motor_ctl_t *rev,int port);
@@ -85,7 +90,7 @@ sem_t sem_self_check;
 uint32_t force_now;										//串口上报的力传感器值
 float pot_now;
 uint32_t state_now;										//socket收到的电机运动状态命令
-int32_t motor_state_flag;										//1:工作   0:不工作   通过互斥锁操作
+int32_t motor_state_flag,motion_mode_flag = MOTION_MODE_GAIT;						
 struct motor_module_run_info_t motor_module_run_info;
 struct motor_module_check_info_t motor_module_check_info;
 struct motor_para_init_t motor_para_init;
@@ -440,6 +445,12 @@ void thread_force_port(void)
             }
         }
         force_t = bubble_sort_and_average(force_temp,5);
+		
+		if(force_t > 129){
+			force_t = (uint32_t)((0.1107*force_t-14.24)*9.8*10);
+		}else{
+			force_t = 0;
+		}
         
         if((force_t < 0)&&(force_t > PROTECTION_FORCE_VALUE)){
             pthread_mutex_lock(&mutex_info);
@@ -1465,6 +1476,7 @@ char *strtrim_user(char *s){
 void thread_gait_zeromq(void)
 {
     uint32_t state_temp,state_temp_old = 3;
+	int32_t motion_mode_flag_temp = MOTION_MODE_GAIT;
 
     struct timeval tv;
     struct timespec ts;
@@ -1506,26 +1518,33 @@ void thread_gait_zeromq(void)
 //                state_temp = 3;
 //             }
 
-            ptr = buffer;
-			strtrim_user(ptr);
-            while((str=strtok_r(ptr,",",&r))!=NULL){
-                if(strcmp(str,"GaitL:") >= 0){
-                    if(strstr(str, "GaitL:A")!=NULL){
-                        state_temp = 1;
-                    }else if(strstr(str, "GaitL:B")!=NULL){
-                        state_temp = 2;
-                    }else if(strstr(str, "GaitL:C")!=NULL){
-                        state_temp = 3;
-                    }
-                }else if(strcmp(str,"GaitR:") >= 0){
+			pthread_mutex_lock(&mutex_client_msg);
+            motion_mode_flag_temp = motion_mode_flag;
+            pthread_mutex_unlock(&mutex_client_msg);
+			
+			if(motion_mode_flag_temp = MOTION_MODE_RELAX){
+				state_temp = 3;
+			}else{
+				ptr = buffer;
+				strtrim_user(ptr);
+				while((str=strtok_r(ptr,",",&r))!=NULL){
+					if(strcmp(str,"GaitL:") >= 0){
+						if(strstr(str, "GaitL:A")!=NULL){
+							state_temp = 1;
+						}else if(strstr(str, "GaitL:B")!=NULL){
+							state_temp = 2;
+						}else if(strstr(str, "GaitL:C")!=NULL){
+							state_temp = 3;
+						}
+					}else if(strcmp(str,"GaitR:") >= 0){
 
-                }else if(strcmp(str,"Gait:") >= 0){
+					}else if(strcmp(str,"Gait:") >= 0){
 
-                }
-                ptr = NULL;
-            }
-            r = NULL;
-
+					}
+					ptr = NULL;
+				}
+				r = NULL;
+			}
             pthread_mutex_lock(&mutex_gait_msg);
             state_now = state_temp;
             pthread_mutex_unlock(&mutex_gait_msg);
@@ -1667,7 +1686,7 @@ int thread_client_zeromq(void)
     char buffer[256] = "",rawdata[256]="",forceaid_str[32];
     char *s;
     int forceaid_temp = 3,zmq_client_try = 1024;
-    int32_t motor_state_flag_temp;
+    int32_t motor_state_flag_temp,motion_mode_flag_temp = MOTION_MODE_GAIT;
 
 
 //#if((RUN_MOTION == REAL)&&(WHERE_MOTION == EXOSUIT_VERSION))
@@ -1864,14 +1883,25 @@ int thread_client_zeromq(void)
                     pthread_mutex_unlock(&mutex_client_msg);
                 }
             }
-
-
             sprintf(rawdata,"setforceaidsuccess");
             zmq_client_try = 1024;
 
             zmq_send(responder,rawdata,strlen(rawdata),0);
             printf("zmq send ok!  %s\n",rawdata);
         }else if(strstr(buffer,"cmdmotormode")!=NULL){
+			
+			if(strstr(buffer, "cmdmotormode:gait")!=NULL){
+				motion_mode_flag_temp = MOTION_MODE_GAIT;
+			}else if(strstr(buffer, "cmdmotormode:fixed")!=NULL){
+				motion_mode_flag_temp = MOTION_MODE_FIXED;
+			}else if(strstr(buffer, "cmdmotormode:relax")!=NULL){
+				motion_mode_flag_temp = MOTION_MODE_RELAX;
+			}			
+			
+			pthread_mutex_lock(&mutex_client_msg);
+            motion_mode_flag = motion_mode_flag_temp;
+            pthread_mutex_unlock(&mutex_client_msg);
+			
             sprintf(rawdata,"setmodesuccess");
             zmq_client_try = 1024;
 
