@@ -13,16 +13,16 @@ int main (void)
 		char buffer [10];
 	cnt++;
 	if(cnt < 27)
-		zmq_send (responder, "Gait:B", 6, 0);
+		zmq_send (responder, "GaitL:B, GaitR:A, Gait:Gatiwalking", 34, 0);
 	else if(cnt < 60)
-		zmq_send (responder, "Gait:C", 6, 0);
+		zmq_send (responder, "GaitL:C, GaitR:A, Gait:Gatiwalking", 34, 0);
 	else if(cnt < 100)
-		zmq_send (responder, "Gait:A", 6, 0);
+		zmq_send (responder, "GaitL:A, GaitR:A, Gait:Gatiwalking", 34, 0);
 	else
 		cnt = 0;
 		
-	usleep (15000);          //  Do some 'work'
+	usleep (12000);          //  Do some 'work'
 //	zmq_send (responder, "Gait:N", 6, 0);
 	}
 	return 0;
-}11111111111111
+}
