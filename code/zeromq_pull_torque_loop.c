@@ -37,12 +37,12 @@
 #define PULL_FORCE_TORQUE_TEST 2                    //力矩环，测试用
 #define STUDY_WALKING_POSITON 3						//测试人行走位置变化
 
-#define GAIT_B_MODE PULL_FIX_POSITION
+#define GAIT_B_MODE PULL_FORCE_TORQUE
 
 #define DEBUG 0                                     //测试用
 #define REAL 1
 
-#define RUN_MOTION DEBUG
+#define RUN_MOTION REAL
 
 #define MOTOR_EN_TRUE 1
 #define MOTOR_EN_FALSE 0
@@ -57,6 +57,8 @@
 
 #define CHANGE_PRELOAD_POSITION 1   				//0 不启用  1 启用    自适应调整预紧力位置
 
+#define CONFIGURATION_ONE 1
+#define SYSTEM_TEST_CONFIGURATION CONFIGURATION_ONE
 
 #define MOTION_MODE_GAIT 1
 #define MOTION_MODE_FIXED 2
@@ -435,24 +437,37 @@ void thread_force_port(void)
 
         tcflush(FrocePort,TCIFLUSH);					//清除掉串口缓存，不然串口会缓存过多数据，导致实时性降低
 
-        for(i=0;i<5;i++){
-            ret = get_force(FrocePort,&force_temp[i]);
-            if(ret == -1){
-                pthread_mutex_lock(&mutex_info);
-                motor_module_run_info.force_senser_error++;		//校验错误，收集错误信息
-                pthread_mutex_unlock(&mutex_info);
-                i--;
-            }
+//        for(i=0;i<5;i++){
+//            ret = get_force(FrocePort,&force_temp[i]);
+//            if(ret == -1){
+//                pthread_mutex_lock(&mutex_info);
+//                motor_module_run_info.force_senser_error++;		//校验错误，收集错误信息
+//                pthread_mutex_unlock(&mutex_info);
+//                i--;
+//            }
+//        }
+
+        do{
+            force_t = 0;
+            ret = get_force(FrocePort,&force_t);
+        }while(ret == -1);
+//        printf("force rawdata: %u\n",force_t);
+
+        if(force_t > 129){
+            force_t = (uint32_t)((0.1107*force_t-14.24)*9.8*10);
+        }else{
+            force_t = 0;
         }
-        force_t = bubble_sort_and_average(force_temp,5);
+
+//        force_t = bubble_sort_and_average(force_temp,5);
 		
-		if(force_t > 129){
-			force_t = (uint32_t)((0.1107*force_t-14.24)*9.8*10);
-		}else{
-			force_t = 0;
-		}
+        if(force_t > 129){
+            force_t = (uint32_t)((0.1107*force_t-14.24)*9.8*10);
+        }else{
+            force_t = 0;
+        }
         
-        if((force_t < 0)&&(force_t > PROTECTION_FORCE_VALUE)){
+        if(force_t > PROTECTION_FORCE_VALUE){
             pthread_mutex_lock(&mutex_info);
             EnableFlag = MOTOR_EN_FALSE;
             pthread_mutex_unlock(&mutex_info);
@@ -1084,7 +1099,7 @@ void thread_motor_port(void)
                             motor_ctl(SET_MOTION,&motor_cmd_position,NULL,MotorPort);
                             motor_ctl(TRAJECTORY_MOVE,NULL,NULL,MotorPort);
                         }
-                        motor_ctl(GET_CURRENT,NULL,&motor_speed,MotorPort);
+                        motor_ctl(GET_CURRENT,NULL,&motor_current,MotorPort);
                         motor_ctl(GET_POSITION,NULL,&motor_position,MotorPort);
                         gettimeofday(&tv,NULL);
                         time_now = (uint32_t)(tv.tv_sec*1000+tv.tv_usec/1000);
@@ -1096,7 +1111,9 @@ void thread_motor_port(void)
 
                         //printf("%u  motor_position = %d motor_speed = %d\n",time_now,motor_position.temp,motor_speed.temp);
                         printf("time=%u force=%d position=%d\n",time_now,force_temp,motor_position.temp);//time=0 force=123 position=0
-#if(RUN_MOTION == REAL)
+#if((RUN_MOTION == REAL)&&(SYSTEM_TEST_CONFIGURATION == CONFIGURATION_ONE))
+                        fprintf(log_fp,"time=%u force=%d position=%d state=%d speed_cmd=%d current=%d\n",time_now,force_temp,motor_position.temp,state_temp,0,motor_current.temp);
+#elif(RUN_MOTION == REAL)
                         fprintf(log_fp,"time=%u force=%d position=%d state=%d speed_cmd=%d\n",time_now,force_temp,motor_position.temp,state_temp,0);
 #endif
                         break;
@@ -1272,15 +1289,19 @@ void thread_motor_port(void)
                         }
 
                         motor_ctl(SET_VELOCITY_MODE_SPEED,&motor_speed_t,NULL,MotorPort);
-
+#if((RUN_MOTION == REAL)&&(SYSTEM_TEST_CONFIGURATION == CONFIGURATION_ONE))
+                        motor_ctl(GET_CURRENT,NULL,&motor_current,MotorPort);
+#endif
                         gettimeofday(&tv,NULL);
                         time_now = (uint32_t)(tv.tv_sec*1000+tv.tv_usec/1000);
                         time_now = (time_now - time_mark)&0x000fffff;
 
                         deltav_force_old = deltav_force;
                         printf("time=%u force=%d position=%d\n",time_now,force_temp,motor_position.temp);//time=0 force=123 position=0
-#if(RUN_MOTION == REAL)
-                        fprintf(log_fp,"time=%u force=%d position=%d state=%d speed_cmd=%d\n",time_now,force_temp,motor_position.temp,state_temp,motor_speed_t);
+#if((RUN_MOTION == REAL)&&(SYSTEM_TEST_CONFIGURATION == CONFIGURATION_ONE))
+                        fprintf(log_fp,"time=%u force=%d position=%d state=%d speed_cmd=%d current=%d\n",time_now,force_temp,motor_position.temp,state_temp,0,motor_current.temp);
+#elif(RUN_MOTION == REAL)
+                        fprintf(log_fp,"time=%u force=%d position=%d state=%d speed_cmd=%d\n",time_now,force_temp,motor_position.temp,state_temp,0);
 #endif
                         break;
 
@@ -1312,7 +1333,9 @@ void thread_motor_port(void)
 
                         }
                         printf("time=%u force=%d position=%d\n",time_now,force_temp,motor_position.temp);
-#if(RUN_MOTION == REAL)
+#if((RUN_MOTION == REAL)&&(SYSTEM_TEST_CONFIGURATION == CONFIGURATION_ONE))
+                        fprintf(log_fp,"time=%u force=%d position=%d state=%d speed_cmd=%d current=%d\n",time_now,force_temp,motor_position.temp,state_temp,0,motor_current.temp);
+#elif(RUN_MOTION == REAL)
                         fprintf(log_fp,"time=%u force=%d position=%d state=%d speed_cmd=%d\n",time_now,force_temp,motor_position.temp,state_temp,0);
 #endif
                         break;
@@ -1370,15 +1393,21 @@ void thread_motor_port(void)
                         pthread_mutex_unlock(&mutex_force);
 
                         motor_ctl(GET_ACTUAL_SPEED,NULL,&motor_speed,MotorPort);
+#if((RUN_MOTION == REAL)&&(SYSTEM_TEST_CONFIGURATION == CONFIGURATION_ONE))
+                        motor_ctl(GET_CURRENT,NULL,&motor_current,MotorPort);
+#endif
+
                         motor_ctl(GET_POSITION,NULL,&motor_position,MotorPort);
                         gettimeofday(&tv,NULL);
                         time_now = (uint32_t)(tv.tv_sec*1000+tv.tv_usec/1000);
                         time_now = (time_now - time_mark)&0x000fffff;
                         //printf("%u  motor_position = %d motor_speed = %d\n",time_now,motor_position.temp,motor_speed.temp);
                         printf("time=%u force=%d position=%d\n",time_now,force_temp,motor_position.temp);
-#if(RUN_MOTION == REAL)
+#if((RUN_MOTION == REAL)&&(SYSTEM_TEST_CONFIGURATION == CONFIGURATION_ONE))
+                        fprintf(log_fp,"time=%u force=%d position=%d state=%d speed_cmd=%d current=%d\n",time_now,force_temp,motor_position.temp,state_temp,0,motor_current.temp);
+#elif(RUN_MOTION == REAL)
                         fprintf(log_fp,"time=%u force=%d position=%d state=%d speed_cmd=%d\n",time_now,force_temp,motor_position.temp,state_temp,0);
-#endif                       
+#endif
                         break;
                     default:
                         usleep(10000);
@@ -1522,7 +1551,7 @@ void thread_gait_zeromq(void)
             motion_mode_flag_temp = motion_mode_flag;
             pthread_mutex_unlock(&mutex_client_msg);
 
-            if(motion_mode_flag_temp = MOTION_MODE_RELAX){
+            if(motion_mode_flag_temp == MOTION_MODE_RELAX){
                 state_temp = 3;
             }else{
                 ptr = buffer;

@@ -1,0 +1,39 @@
+Active Faults and Warnings:
+None
+
+Fault/Warning History:
+Reset  Amplifier Reset          00:00:00
+Warning Current Limited          00:04:19
+Warning Current Limited          00:03:17
+Reset  Amplifier Reset          00:00:00
+Reset  Amplifier Reset          00:00:00
+Latched Fault Following Error         00:04:29
+Warning Current Limited          00:04:27
+Warning Current Limited          00:03:42
+Reset  Amplifier Reset          00:00:00
+Reset  Amplifier Reset          00:00:00
+Reset  Amplifier Reset          00:00:00
+Reset  Amplifier Reset          00:00:00
+Warning Current Limited          00:03:13
+Warning Current Limited          00:03:12
+Warning Current Limited          00:03:11
+Warning Current Limited          00:03:09
+Warning Current Limited          00:03:09
+Warning Current Limited          00:03:08
+Warning Current Limited          00:03:08
+Warning Current Limited          00:03:07
+Warning Current Limited          00:03:04
+Warning Current Limited          00:03:04
+Warning Current Limited          00:03:03
+Warning Current Limited          00:03:01
+
+
+Fault/Warning Frequency:
+Fault  Short Circuit      6
+Fault  Under Voltage      1
+Fault  Motor Over Temp     2
+Fault  Motor Phasing Error     6
+Fault  Following Error      53
+Fault  Command Input Fault     3
+Warning Current Limited    255
+Warning Voltage Limited      31

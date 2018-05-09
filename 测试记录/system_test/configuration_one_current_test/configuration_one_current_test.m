@@ -1,13 +1,13 @@
 
-fp1 = fopen('D:\Github\pi_copley_motor_ctl.git\²âÊÔ¼ÇÂ¼\system_test\configuration_one_current_test\motor_log_2018_05_09_1118.txt');
+fp1 = fopen('D:\Github\pi_copley_motor_ctl.git\²âÊÔ¼ÇÂ¼\system_test\configuration_one_current_test\motor_log_2018_05_09_1650.txt');
 
 B = textscan(fp1,'%s%s%s%s%s%s%s%s');
 
 
 ln2 = size(B{1,1});
 ln2 = ln2(1)-1;
-a2 = 4000;
-b2 = 4500;
+a2 = 1000;
+b2 = 1500;
 
 
 b_t1 = str2num(char(strrep(B{1,1}(a2:b2,1),'time=',''))); %#ok<*ST2NM>
