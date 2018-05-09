@@ -37,7 +37,7 @@
 #define PULL_FORCE_TORQUE_TEST 2                    //力矩环，测试用
 #define STUDY_WALKING_POSITON 3						//测试人行走位置变化
 
-#define GAIT_B_MODE PULL_FORCE_TORQUE
+#define GAIT_B_MODE PULL_FIX_POSITION
 
 #define DEBUG 0                                     //测试用
 #define REAL 1
@@ -1476,7 +1476,7 @@ char *strtrim_user(char *s){
 void thread_gait_zeromq(void)
 {
     uint32_t state_temp,state_temp_old = 3;
-	int32_t motion_mode_flag_temp = MOTION_MODE_GAIT;
+    int32_t motion_mode_flag_temp = MOTION_MODE_GAIT;
 
     struct timeval tv;
     struct timespec ts;
@@ -1518,33 +1518,33 @@ void thread_gait_zeromq(void)
 //                state_temp = 3;
 //             }
 
-			pthread_mutex_lock(&mutex_client_msg);
+            pthread_mutex_lock(&mutex_client_msg);
             motion_mode_flag_temp = motion_mode_flag;
             pthread_mutex_unlock(&mutex_client_msg);
-			
-			if(motion_mode_flag_temp = MOTION_MODE_RELAX){
-				state_temp = 3;
-			}else{
-				ptr = buffer;
-				strtrim_user(ptr);
-				while((str=strtok_r(ptr,",",&r))!=NULL){
-					if(strcmp(str,"GaitL:") >= 0){
-						if(strstr(str, "GaitL:A")!=NULL){
-							state_temp = 1;
-						}else if(strstr(str, "GaitL:B")!=NULL){
-							state_temp = 2;
-						}else if(strstr(str, "GaitL:C")!=NULL){
-							state_temp = 3;
-						}
-					}else if(strcmp(str,"GaitR:") >= 0){
 
-					}else if(strcmp(str,"Gait:") >= 0){
+            if(motion_mode_flag_temp = MOTION_MODE_RELAX){
+                state_temp = 3;
+            }else{
+                ptr = buffer;
+                strtrim_user(ptr);
+                while((str=strtok_r(ptr,",",&r))!=NULL){
+                    if(strcmp(str,"GaitL:") >= 0){
+                        if(strstr(str, "GaitL:A")!=NULL){
+                            state_temp = 1;
+                        }else if(strstr(str, "GaitL:B")!=NULL){
+                            state_temp = 2;
+                        }else if(strstr(str, "GaitL:C")!=NULL){
+                            state_temp = 3;
+                        }
+                    }else if(strcmp(str,"GaitR:") >= 0){
 
-					}
-					ptr = NULL;
-				}
-				r = NULL;
-			}
+                    }else if(strcmp(str,"Gait:") >= 0){
+
+                    }
+                    ptr = NULL;
+                }
+                r = NULL;
+            }
             pthread_mutex_lock(&mutex_gait_msg);
             state_now = state_temp;
             pthread_mutex_unlock(&mutex_gait_msg);
@@ -1889,19 +1889,19 @@ int thread_client_zeromq(void)
             zmq_send(responder,rawdata,strlen(rawdata),0);
             printf("zmq send ok!  %s\n",rawdata);
         }else if(strstr(buffer,"cmdmotormode")!=NULL){
-			
-			if(strstr(buffer, "cmdmotormode:gait")!=NULL){
-				motion_mode_flag_temp = MOTION_MODE_GAIT;
-			}else if(strstr(buffer, "cmdmotormode:fixed")!=NULL){
-				motion_mode_flag_temp = MOTION_MODE_FIXED;
-			}else if(strstr(buffer, "cmdmotormode:relax")!=NULL){
-				motion_mode_flag_temp = MOTION_MODE_RELAX;
-			}			
-			
-			pthread_mutex_lock(&mutex_client_msg);
+
+            if(strstr(buffer, "cmdmotormode:gait")!=NULL){
+                motion_mode_flag_temp = MOTION_MODE_GAIT;
+            }else if(strstr(buffer, "cmdmotormode:fixed")!=NULL){
+                motion_mode_flag_temp = MOTION_MODE_FIXED;
+            }else if(strstr(buffer, "cmdmotormode:relax")!=NULL){
+                motion_mode_flag_temp = MOTION_MODE_RELAX;
+            }
+
+            pthread_mutex_lock(&mutex_client_msg);
             motion_mode_flag = motion_mode_flag_temp;
             pthread_mutex_unlock(&mutex_client_msg);
-			
+
             sprintf(rawdata,"setmodesuccess");
             zmq_client_try = 1024;
 
