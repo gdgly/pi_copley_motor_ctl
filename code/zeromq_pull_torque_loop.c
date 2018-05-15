@@ -454,18 +454,12 @@ void thread_force_port(void)
 //        printf("force rawdata: %u\n",force_t);
 
         if(force_t > 129){
-            force_t = (uint32_t)((0.1107*force_t-14.24)*9.8*10);
+            force_t = (uint32_t)((0.1107*force_t-14.24)*9.8);
         }else{
             force_t = 0;
         }
 
 //        force_t = bubble_sort_and_average(force_temp,5);
-		
-        if(force_t > 129){
-            force_t = (uint32_t)((0.1107*force_t-14.24)*9.8*10);
-        }else{
-            force_t = 0;
-        }
         
         if(force_t > PROTECTION_FORCE_VALUE){
             pthread_mutex_lock(&mutex_info);
