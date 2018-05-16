@@ -1,5 +1,5 @@
 
-fp1 = fopen('D:\Github\pi_copley_motor_ctl.git\²âÊÔ¼ÇÂ¼\system_test\configuration_one_current_test\motor_log_2018_05_09_1650.txt');
+fp1 = fopen('D:\Github\pi_copley_motor_ctl.git\²âÊÔ¼ÇÂ¼\system_test\configuration_one_current_test\motor_log_2018_05_15_1344.txt');
 
 B = textscan(fp1,'%s%s%s%s%s%s%s%s');
 
@@ -18,7 +18,8 @@ b_spd1 = -str2num(char(strrep(B{1,5}(a2:b2,1),'speed_cmd=','')));
 b_cut = str2num(char(strrep(B{1,6}(a2:b2,1),'current=','')));
 
 
-b_po2 = 30000 - b_po1;
+b_po2 = (30000 - b_po1)/325;
+b_po1 = b_po1/325
 b_s1 = b_po1*0;
 
 
@@ -39,15 +40,15 @@ for i=10:(b2-a2)
 end
 
 
-% plot(b_t2,b_spd1/70);
-% hold on;
-plot(b_t2,b_f1*20);
+plot(b_t2,b_spd1/20000);
+hold on;
+plot(b_t2,b_f1/10);
 hold on;
 plot(b_t2,b_po2);
 hold on;
-% plot(b_t2,b_s1);
-% hold on;
-% plot(b_t2,b_st1*1000);
-% hold on;
-plot(b_t2,-b_cut*10);
-fclose(fp1);
+plot(b_t2,b_s1);
+hold on;
+plot(b_t2,b_st1*10);
+hold on;
+% plot(b_t2,-b_cut*10);
+% fclose(fp1);
