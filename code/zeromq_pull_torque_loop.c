@@ -5,14 +5,14 @@
 #define EXOSUIT_VERSION 1                           //穿戴版
 
 #define ENCODE_1MM 325								//1mm对应的电位计计数  325
-#define SELF_CHECK_ADJUST_MM 30							//自检对应的最大调整位置 mm
-#define MOTION_ADJUST_MM 10									//自适应对应的最大调制位置 mm
+#define SELF_CHECK_ADJUST_MM 15							//自检对应的最大调整位置 mm
+#define MOTION_ADJUST_MM 30									//自适应对应的最大调制位置 mm
 
 #define WHERE_MOTION EXOSUIT_VERSION
 
 #if(WHERE_MOTION == EXOSUIT_VERSION)
 #define SELF_CHECK_POT_VALUE 2.6
-#define ENCODER_DEFUALT_POSITON 30000				//总行程为37076  设置最远点为0
+#define ENCODER_DEFUALT_POSITON 30000				//总行程为30000  设置最远点为0
 #define MOTOR_ENCODER_DIRECTION 1
 #define POT_VALUE_LONG 	1.87						//波登线拉到最长时电位计的数据
 #define POT_VALUE_SHORT 2.54						//波登线拉到最短时电位计的数据
@@ -563,7 +563,7 @@ void thread_pot_port(void)
 {
     float pot_t;
     float pot_x,pot_y,pot_mid;
-    int32_t pot_temp;
+    int32_t pot_temp,pot_temp_old;
 
     void *context = zmq_ctx_new ();
     void *requester = zmq_socket (context, ZMQ_SUB);
@@ -575,6 +575,11 @@ void thread_pot_port(void)
     memset(buffer,0,sizeof(buffer));
     zmq_recv (requester, buffer, sizeof(buffer), 0);
 
+	s = strstr(buffer,"pubofposition: ");
+	
+	sprintf(port_str,"%s",s+strlen("pubofposition: "));
+    sscanf(port_str,"%d",&pot_temp_old);
+	
     pthread_mutex_lock(&mutex_info);
     sprintf(motor_module_check_info.pot_port_state,"%s",SENSER_NO_DATA);
     pthread_mutex_unlock(&mutex_info);
@@ -595,18 +600,33 @@ void thread_pot_port(void)
         pot_mid = pot_mid - 3.3;
     }
 #endif
-	
+	// int y_cnt = 0,n_cnt = 0;
     while(1){
 
+	
+		
         memset(buffer,0,sizeof(buffer));
         zmq_recv (requester, buffer, sizeof(buffer), 0);
-
+		// y_cnt ++;
         s = strstr(buffer,"pubofposition: ");
         if(s != NULL){
             sprintf(port_str,"%s",s+strlen("pubofposition: "));
             sscanf(port_str,"%d",&pot_temp);
 
+			// printf("position raw data : %d %d %d \n", pot_temp, n_cnt , y_cnt);		//统计电位计过零出现错数的概率：6.6%	
+			
+			if(abs(pot_temp - pot_temp_old) > 500){									//处理过零出现异常数据
+				if((pot_temp > 3200)||(pot_temp < 100)){
+					pot_temp_old = pot_temp;
+				}else{
+					pot_temp = pot_temp_old;
+					// n_cnt++;
+				}
+			}
+			
             pot_t = (float)pot_temp/1000;
+			pot_temp_old = pot_temp;
+
 
 #if(WHERE_MOTION == EXOSUIT_VERSION)
             if(pot_t < pot_mid){
@@ -618,7 +638,7 @@ void thread_pot_port(void)
             if((pot_t < PROTECTION_POT_VALUE_L)||(pot_t > PROTECTION_POT_VALUE_H)){
                 pthread_mutex_lock(&mutex_info);
                 EnableFlag = MOTOR_EN_FALSE;
-                printf("position out of range\n");
+                printf("position out of range : %f\n",pot_t);
                 pthread_mutex_unlock(&mutex_info);
             }
 
@@ -710,7 +730,7 @@ void thread_pot_port(void)
 void thread_motor_port(void)
 {
     int MotorPort;
-    int deltav_motor=0,deltav_motor_old,motor_cmd_position,motor_cmd_velocity,max_position;
+    int deltav_motor=0,deltav_motor_old,motor_cmd_position,motor_cmd_velocity,max_position_adaptive;
     float pot_temp;
     int i,nwrite,index,pndex,dndex,nset_acc,max_force_cnt,motor_speed_t,motor_speed_t_old;
     uint32_t state_temp,state_old=0,gait_temp,force_temp,max_force,pre_force;
@@ -753,7 +773,7 @@ void thread_motor_port(void)
         motor_para_init_temp = motor_para_init;
 		motor_para_init_rawdata= motor_para_init;				  
         pthread_mutex_unlock(&mutex_client_msg);
-        max_position = motor_para_init_temp.max_position;
+        max_position_adaptive = 0;
         deltav_motor_old = 0;
         max_force_cnt = 0;
 
@@ -986,7 +1006,7 @@ void thread_motor_port(void)
                                     motor_para_init_temp.max_position = delatv_preload + motor_para_init_temp.max_position;
                                 }
 
-                                max_position = motor_para_init_temp.max_position;
+                                max_position_adaptive = 0;
                                 printf("what is preload_position = %d\n",motor_para_init_temp.preload_position);
                                 break;
                             }
@@ -1067,6 +1087,9 @@ void thread_motor_port(void)
 
                 case CTL_CMDMOTIONSTART:																					//开始工作
                     if(motor_state_flag_temp != motor_state_flag_temp_old){
+						
+						max_position_adaptive = 0;
+						
                         pthread_mutex_lock(&mutex_client_msg);
                         forceaid_temp = forceaid;
                         pthread_mutex_unlock(&mutex_client_msg);
@@ -1110,6 +1133,12 @@ void thread_motor_port(void)
                         pthread_mutex_lock(&mutex_force);			//获取当前力矩
                         force_temp = force_now;
                         pthread_mutex_unlock(&mutex_force);
+						
+						if(force_temp > 500){						//考虑到预紧力的存在，设置50N的保护限制
+							pthread_mutex_lock(&mutex_info);
+							EnableFlag = MOTOR_EN_FALSE;
+							pthread_mutex_unlock(&mutex_info);							
+						}
 
                         printf("time=%u force=%d position=%d\n",time_now,force_temp,motor_position.temp);//time=0 force=123 position=0
 #if((RUN_MOTION == REAL)&&(SYSTEM_TEST_CONFIGURATION == CONFIGURATION_ONE))
@@ -1309,11 +1338,29 @@ void thread_motor_port(void)
 #if(GAIT_B_MODE==PULL_FIX_POSITION)
 
                         if(state_temp != state_old){
-                            motor_cmd_velocity = motor_para_init_temp.max_velocity;																		//设置运动速度为14000rpm 此参数需要可以配置
+							
+							pthread_mutex_lock(&mutex_force);			//获取当前预紧力
+							pre_force = force_now;
+							pthread_mutex_unlock(&mutex_force);	
+
+							max_force_cnt = 0;
+							
+							max_force = (uint32_t)(max_force/max_force_cnt);
+							deltav_force = motor_para_init_temp.max_force - max_force;
+							max_position_adaptive = max_position_adaptive - deltav_force*2;
+
+							if(max_position_adaptive < 0 - MAX_POSITION_ADJUST){
+								max_position_adaptive = 0 - MAX_POSITION_ADJUST;
+							}else if(max_position_adaptive > MAX_POSITION_ADJUST){
+								max_position_adaptive = MAX_POSITION_ADJUST;
+							}							
+							
+                            motor_cmd_velocity = motor_para_init_temp.max_velocity;																		
                             motor_ctl(SET_VELOCITY,&motor_cmd_velocity,NULL,MotorPort);
-                            motor_cmd_position = max_position;
+                            motor_cmd_position = max_position_adaptive + motor_para_init_temp.max_position;
                             motor_ctl(SET_MOTION,&motor_cmd_position,NULL,MotorPort);
                             motor_ctl(TRAJECTORY_MOVE,NULL,NULL,MotorPort);
+							
                         }
 
                         motor_ctl(GET_POSITION,NULL,&motor_position,MotorPort);
@@ -1328,7 +1375,7 @@ void thread_motor_port(void)
                         force_temp = force_now;
                         pthread_mutex_unlock(&mutex_force);
 
-                        if(abs(motor_position.temp - motor_cmd_position) < 100){
+                        if((abs(motor_position.temp - motor_cmd_position) < 100)&&(max_force_cnt < 5)){
                             max_force = max_force + force_temp;
                             max_force_cnt++;
                         }
@@ -1383,10 +1430,7 @@ void thread_motor_port(void)
                                 motor_para_init_temp.zero_position = delatv_preload + motor_para_init_temp.zero_position;
                                 motor_para_init_temp.max_position = delatv_preload + motor_para_init_temp.max_position;
                             }
-                            max_position = motor_para_init_temp.max_position;
-
 #endif		   
-
                         }
 
                         pthread_mutex_lock(&mutex_force);			//获取当前力矩
@@ -1398,6 +1442,15 @@ void thread_motor_port(void)
                         motor_ctl(GET_CURRENT,NULL,&motor_current,MotorPort);
 #endif						
                         motor_ctl(GET_POSITION,NULL,&motor_position,MotorPort);
+						
+						if(motor_position.temp > motor_para_init_temp.zero_position - 50*ENCODE_1MM){										//在距离零点5cm以内，力传感器反馈大于300N在时保护
+							if(force_temp > 300){
+								pthread_mutex_lock(&mutex_info);
+								EnableFlag = MOTOR_EN_FALSE;
+								pthread_mutex_unlock(&mutex_info);
+							}							
+						}	
+						
                         gettimeofday(&tv,NULL);
                         time_now = (uint32_t)(tv.tv_sec*1000+tv.tv_usec/1000);
                         time_now = (time_now - time_mark)&0x000fffff;
@@ -1413,30 +1466,6 @@ void thread_motor_port(void)
                         usleep(10000);
                         break;
                     }
-
-#if(GAIT_B_MODE==PULL_FIX_POSITION)
-
-                    if((state_temp == 1)&&(state_old == 3)&&(max_force_cnt != 0)){
-
-                        gettimeofday(&tv,NULL);
-                        time_now = (uint32_t)(tv.tv_sec*1000+tv.tv_usec/1000);
-                        time_now = (time_now - time_mark)&0x000fffff;
-
-                        max_force = (uint32_t)(max_force/max_force_cnt);
-                        deltav_force = motor_para_init_temp.max_force - max_force;
-                        max_position = max_position - deltav_force*2;
-
-                        if(max_position < motor_para_init_temp.max_position - MAX_POSITION_ADJUST){
-                            max_position = motor_para_init_temp.max_position - MAX_POSITION_ADJUST;
-                        }else if(max_position > motor_para_init_temp.max_position + MAX_POSITION_ADJUST){
-                            max_position = motor_para_init_temp.max_position + MAX_POSITION_ADJUST;
-                        }
-
-                        max_force = 0;
-                        max_force_cnt = 0;
-                    }
-
-#endif // (GAIT_B_MODE==PULL_FIX_POSITION)
                     state_old = state_temp;
                     break;
                 default:
