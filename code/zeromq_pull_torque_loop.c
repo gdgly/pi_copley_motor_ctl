@@ -4,32 +4,32 @@
 #define DESKTOP_VERSION 0                           //桌面版
 #define EXOSUIT_VERSION 1                           //穿戴版
 
-#define ENCODE_1MM 325								//1mm对应的电位计计数  325
+#define ENCODE_1MM 778								//1mm对应的电位计计数  778
 #define SELF_CHECK_ADJUST_MM 15							//自检对应的最大调整位置 mm
-#define MOTION_ADJUST_MM 30									//自适应对应的最大调制位置 mm
+#define MOTION_ADJUST_MM 10									//自适应对应的最大调制位置 mm
 
 #define WHERE_MOTION EXOSUIT_VERSION
 
 #if(WHERE_MOTION == EXOSUIT_VERSION)
 #define SELF_CHECK_POT_VALUE 2.6
-#define ENCODER_DEFUALT_POSITON 30000				//总行程为30000  设置最远点为0
+#define ENCODER_DEFUALT_POSITON 100000				//总行程为100000  设置最远点为0
 #define MOTOR_ENCODER_DIRECTION 1
-#define POT_VALUE_LONG 	1.87						//波登线拉到最长时电位计的数据
-#define POT_VALUE_SHORT 2.54						//波登线拉到最短时电位计的数据
+#define POT_VALUE_LONG 	1.02						//波登线拉到最长时电位计的数据
+#define POT_VALUE_SHORT 1.76						//波登线拉到最短时电位计的数据
 #endif
 
 #if(WHERE_MOTION == DESKTOP_VERSION)
-#define SELF_CHECK_POT_VALUE 0.3
+#define SELF_CHECK_POT_VALUE 0.45
 #define ENCODER_DEFUALT_POSITON 35000
 #endif
 
-#define VELOCITY_MODE_MAX_SPEED 1500000
-#define VELOCITY_MODE_MAX_ACC 2000000
+#define VELOCITY_MODE_MAX_SPEED 2400000
+#define VELOCITY_MODE_MAX_ACC 4000000
 #define SELF_CHECK_FORCE_VALUE 150
 
 #define PROTECTION_FORCE_VALUE 1400                 //超过140N自动保护
-#define PROTECTION_POT_VALUE_H 2.7                  //电位计保护最大2.7
-#define PROTECTION_POT_VALUE_L 0.6                  //电位计保护最小0.6
+#define PROTECTION_POT_VALUE_H 3.15                  //电位计保护最大2.7
+#define PROTECTION_POT_VALUE_L 0.3                  //电位计保护最小0.6
 
 #define PULL_FIX_POSITION 0                         //固定位置模式
 #define PULL_FORCE_TORQUE 1                         //力矩还模式
@@ -52,11 +52,11 @@
 
 #define SYSTEM_OFF 0
 #define SYSTEM_ON 1
-#define SYSTEM_CLIENT_TEST SYSTEM_ON
+#define SYSTEM_CLIENT_TEST SYSTEM_OFF
 
 #define CHANGE_PRELOAD_POSITION 1   				//0 不启用  1 启用    自适应调整预紧力位置
 
-#define MAX_POSITION_ADJUST 1000					//最大位置调整区间
+#define MAX_POSITION_ADJUST 3250					//最大位置调整区间 1cm
 
 
 #define CONFIGURATION_ONE 1
@@ -99,6 +99,8 @@ struct motor_module_run_info_t motor_module_run_info;
 struct motor_module_check_info_t motor_module_check_info;
 struct motor_para_init_t motor_para_init;
 int forceaid = PULL_RATIO_H;
+
+int is_relax = 0;
 
 //获取力传感器数据，一帧的格式为 帧头：0x53 数据：0x** 0x** 校验：两个数据的与 帧尾：0x59
 int get_force(int port,uint32_t *msg)
@@ -458,12 +460,16 @@ void thread_force_port(void)
 //        force_t = bubble_sort_and_average(force_temp,5);
         // printf("force rawdata: %u\n",force_t);
         
-        if(force_t > 129){
-            force_t = (uint32_t)((0.1107*force_t-14.24)*9.8);
-        }else{
-            force_t = 0;
-        }
-
+		force_t = 0;
+		if(force_t <= 80){
+			force_t = 0;
+		}else if((force_t > 80)&&(force_t < 700)){
+			force_t = (uint32_t)((0.1068*force_t - 0.8343)*9.8);
+		}else{
+			force_t = (uint32_t)((0.1107*force_t-14.24)*9.8);
+		}
+		
+		
         if(force_t > PROTECTION_FORCE_VALUE){
             pthread_mutex_lock(&mutex_info);
             EnableFlag = MOTOR_EN_FALSE;
@@ -602,9 +608,6 @@ void thread_pot_port(void)
 #endif
 	// int y_cnt = 0,n_cnt = 0;
     while(1){
-
-	
-		
         memset(buffer,0,sizeof(buffer));
         zmq_recv (requester, buffer, sizeof(buffer), 0);
 		// y_cnt ++;
@@ -993,12 +996,13 @@ void thread_motor_port(void)
                                 //根据测到的预紧力位置计算零位和最大位置
                                 delatv_preload = init_position_overrange/10 - motor_para_init_temp.preload_position;
                                 motor_para_init_temp.preload_position = delatv_preload + motor_para_init_temp.preload_position;
+								printf("what is preload_position = %d\n",motor_para_init_temp.preload_position);
                                 if(motor_para_init_temp.preload_position > motor_para_init_rawdata.preload_position + SELF_CHECK_ADJUST_MM*ENCODE_1MM){
                                     motor_para_init_temp.preload_position = motor_para_init_rawdata.preload_position + SELF_CHECK_ADJUST_MM*ENCODE_1MM;
                                     motor_para_init_temp.zero_position = motor_para_init_rawdata.zero_position + SELF_CHECK_ADJUST_MM*ENCODE_1MM;
                                     motor_para_init_temp.max_position = motor_para_init_rawdata.max_position + SELF_CHECK_ADJUST_MM*ENCODE_1MM;
-                                }else if(motor_para_init_temp.preload_position < preload_position_rawdata - SELF_CHECK_ADJUST_MM*ENCODE_1MM){
-                                    motor_para_init_temp.preload_position = preload_position_rawdata - SELF_CHECK_ADJUST_MM*ENCODE_1MM;
+                                }else if(motor_para_init_temp.preload_position < motor_para_init_rawdata.preload_position - SELF_CHECK_ADJUST_MM*ENCODE_1MM){
+                                    motor_para_init_temp.preload_position = motor_para_init_rawdata.preload_position - SELF_CHECK_ADJUST_MM*ENCODE_1MM;
                                     motor_para_init_temp.zero_position = motor_para_init_rawdata.zero_position - SELF_CHECK_ADJUST_MM*ENCODE_1MM;
                                     motor_para_init_temp.max_position = motor_para_init_rawdata.max_position - SELF_CHECK_ADJUST_MM*ENCODE_1MM;
                                 }else{
@@ -1052,9 +1056,10 @@ void thread_motor_port(void)
                     break;
 
                 case CTL_CMDMOTIONSLEEP:																		//停机
+				
 
                     if(motor_state_flag_temp != motor_state_flag_temp_old){
-
+												
                         nwrite = ENABLE_POSITION_MODE;
                         motor_ctl(SET_DESIRED_STATE,&nwrite,NULL,MotorPort);
 
@@ -1062,8 +1067,51 @@ void thread_motor_port(void)
                         motor_ctl(SET_MOTION,&motor_cmd_position,NULL,MotorPort);
                         motor_ctl(TRAJECTORY_MOVE,NULL,NULL,MotorPort);
                         sem_post(&sem_client);
-                    }else{
-                        usleep(200000);
+                    }else{												
+                        usleep(200000);		
+						if(is_relax == 1){
+							int relax_i = 0;
+							
+							motor_cmd_velocity = 200000;																		//设置运动速度为14000rpm 此参数需要可以配置
+							motor_ctl(SET_VELOCITY,&motor_cmd_velocity,NULL,MotorPort);
+
+							motor_cmd_position = 0;
+							motor_ctl(SET_MOTION,&motor_cmd_position,NULL,MotorPort);
+							motor_ctl(TRAJECTORY_MOVE,NULL,NULL,MotorPort);			
+
+							for(relax_i=0;relax_i<100;relax_i++){
+								motor_ctl(GET_POSITION,NULL,&motor_position,MotorPort);
+								motor_ctl(GET_CURRENT,NULL,&motor_current,MotorPort);
+								pthread_mutex_lock(&mutex_force);			//获取当前力矩
+								force_temp = force_now;
+								pthread_mutex_unlock(&mutex_force);
+								printf("current test:\n");
+								printf("current = %d\n", motor_current.temp);
+								printf("force = %d\n", force_temp);
+								printf("position = %d\n", motor_position.temp);
+								printf("\n");
+								usleep(20000);
+							}
+
+							motor_cmd_position = 30000;
+							motor_ctl(SET_MOTION,&motor_cmd_position,NULL,MotorPort);
+							motor_ctl(TRAJECTORY_MOVE,NULL,NULL,MotorPort);	
+							for(relax_i=0;relax_i<100;relax_i++){
+								motor_ctl(GET_POSITION,NULL,&motor_position,MotorPort);
+								motor_ctl(GET_CURRENT,NULL,&motor_current,MotorPort);
+								pthread_mutex_lock(&mutex_force);			//获取当前力矩
+								force_temp = force_now;
+								pthread_mutex_unlock(&mutex_force);								
+								printf("current test:\n");
+								printf("current = %d\n", motor_current.temp);
+								printf("force = %d\n", force_temp);								
+								printf("position = %d\n", motor_position.temp);
+								printf("\n");
+								usleep(10000);
+							}							
+							is_relax = 0;
+						}
+						
                     }
 
                     break;
@@ -1089,10 +1137,13 @@ void thread_motor_port(void)
                     if(motor_state_flag_temp != motor_state_flag_temp_old){
 						
 						max_position_adaptive = 0;
-						
+						max_force_cnt = 1;
+
                         pthread_mutex_lock(&mutex_client_msg);
                         forceaid_temp = forceaid;
                         pthread_mutex_unlock(&mutex_client_msg);
+						
+						max_force = motor_para_init_temp.max_force*forceaid_temp;
 						
                         nwrite = ENABLE_POSITION_MODE;
                         motor_ctl(SET_DESIRED_STATE,&nwrite,NULL,MotorPort);
@@ -1136,7 +1187,7 @@ void thread_motor_port(void)
 						
 						if(force_temp > 500){						//考虑到预紧力的存在，设置50N的保护限制
 							pthread_mutex_lock(&mutex_info);
-							EnableFlag = MOTOR_EN_FALSE;
+//							EnableFlag = MOTOR_EN_FALSE;
 							pthread_mutex_unlock(&mutex_info);							
 						}
 
@@ -1343,11 +1394,12 @@ void thread_motor_port(void)
 							pre_force = force_now;
 							pthread_mutex_unlock(&mutex_force);	
 
-							max_force_cnt = 0;
-							
-							max_force = (uint32_t)(max_force/max_force_cnt);
-							deltav_force = motor_para_init_temp.max_force - max_force;
-							max_position_adaptive = max_position_adaptive - deltav_force*2;
+							if(max_force_cnt != 0){
+								max_force = (uint32_t)(max_force/max_force_cnt);
+								deltav_force = motor_para_init_temp.max_force*forceaid_temp - max_force;
+								max_position_adaptive = max_position_adaptive - deltav_force*2;		
+								// printf("max_position_adaptive : [%d]\n", max_position_adaptive);
+							}
 
 							if(max_position_adaptive < 0 - MAX_POSITION_ADJUST){
 								max_position_adaptive = 0 - MAX_POSITION_ADJUST;
@@ -1361,6 +1413,8 @@ void thread_motor_port(void)
                             motor_ctl(SET_MOTION,&motor_cmd_position,NULL,MotorPort);
                             motor_ctl(TRAJECTORY_MOVE,NULL,NULL,MotorPort);
 							
+							max_force = 0;
+							max_force_cnt = 0;
                         }
 
                         motor_ctl(GET_POSITION,NULL,&motor_position,MotorPort);
@@ -1378,6 +1432,7 @@ void thread_motor_port(void)
                         if((abs(motor_position.temp - motor_cmd_position) < 100)&&(max_force_cnt < 5)){
                             max_force = max_force + force_temp;
                             max_force_cnt++;
+							// printf("max_force : [%d] max_force_cnt : [%d]\n", max_force, max_force_cnt);
                         }
 
                         printf("time=%u force=%d position=%d\n",time_now,force_temp,motor_position.temp);
@@ -1395,7 +1450,7 @@ void thread_motor_port(void)
 
                             integral_force = 0;
 
-                            motor_cmd_velocity = 1400000;																		//设置运动速度为14000rpm 此参数需要可以配置
+                            motor_cmd_velocity = motor_para_init_temp.max_velocity;;																		//设置运动速度为14000rpm 此参数需要可以配置
                             motor_ctl(SET_VELOCITY,&motor_cmd_velocity,NULL,MotorPort);
                             
                             nwrite = ENABLE_POSITION_MODE;
@@ -1446,7 +1501,7 @@ void thread_motor_port(void)
 						if(motor_position.temp > motor_para_init_temp.zero_position - 50*ENCODE_1MM){										//在距离零点5cm以内，力传感器反馈大于300N在时保护
 							if(force_temp > 300){
 								pthread_mutex_lock(&mutex_info);
-								EnableFlag = MOTOR_EN_FALSE;
+//								EnableFlag = MOTOR_EN_FALSE;
 								pthread_mutex_unlock(&mutex_info);
 							}							
 						}	
@@ -1761,7 +1816,7 @@ int thread_client_zeromq(void)
     pthread_mutex_unlock(&mutex_client_msg);
 #endif
 
-#if(((RUN_MOTION == DEBUG)||(WHERE_MOTION == DESKTOP_VERSION))&&(SYSTEM_CLIENT_TEST == SYSTEM_OFF))
+#if(((RUN_MOTION == DEBUG)||(WHERE_MOTION == DESKTOP_VERSION))||(SYSTEM_CLIENT_TEST == SYSTEM_OFF))
     motor_state_flag_temp = CTL_CMDINITIAL;
     pthread_mutex_lock(&mutex_client_msg);
     get_default_settings();
@@ -1793,7 +1848,7 @@ int thread_client_zeromq(void)
 
 
     while(zmq_client_try){
-
+		memset(buffer, 0 ,sizeof(buffer));
         zmq_recv(responder,buffer,sizeof(buffer),0);
         printf("what is rev:%s\n",buffer);
 
@@ -1962,6 +2017,13 @@ int thread_client_zeromq(void)
                 motion_mode_flag_temp = MOTION_MODE_FIXED;
             }else if(strstr(buffer, "cmdmotormode:relax")!=NULL){
                 motion_mode_flag_temp = MOTION_MODE_RELAX;
+				
+                motor_state_flag_temp = CTL_CMDMOTIONSLEEP;
+                pthread_mutex_lock(&mutex_client_msg);
+                motor_state_flag = motor_state_flag_temp;
+                pthread_mutex_unlock(&mutex_client_msg);	
+				
+				is_relax = 1;
             }
 
             pthread_mutex_lock(&mutex_client_msg);
